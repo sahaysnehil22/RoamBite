@@ -97,7 +97,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: Image.asset(
-                          'assets/images/roambite_logo.jpg',
+                          'assets/images/roambite_logo_white.png',
                           width: 36,
                           height: 36,
                           fit: BoxFit.cover,
