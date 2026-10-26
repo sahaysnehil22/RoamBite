@@ -18,7 +18,7 @@ class RadarPulsePainter extends CustomPainter {
     final maxRadius = math.min(size.width, size.height) * 0.48;
 
     final basePaint = Paint()
-      ..color = Colors.white.withOpacity(0.06)
+      ..color = Colors.white.withValues(alpha: 0.06)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
@@ -30,7 +30,7 @@ class RadarPulsePainter extends CustomPainter {
 
     // Draw crosshair grid lines
     final gridPaint = Paint()
-      ..color = Colors.white.withOpacity(0.04)
+      ..color = Colors.white.withValues(alpha: 0.04)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
     canvas.drawLine(Offset(center.dx, center.dy - maxRadius), Offset(center.dx, center.dy + maxRadius), gridPaint);
@@ -43,7 +43,7 @@ class RadarPulsePainter extends CustomPainter {
       final opacity = (1.0 - waveProgress) * 0.45;
 
       final wavePaint = Paint()
-        ..color = primaryColor.withOpacity(opacity)
+        ..color = primaryColor.withValues(alpha: opacity)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0;
 
@@ -53,8 +53,8 @@ class RadarPulsePainter extends CustomPainter {
       final fillPaint = Paint()
         ..shader = RadialGradient(
           colors: [
-            primaryColor.withOpacity(opacity * 0.25),
-            primaryColor.withOpacity(0.0),
+            primaryColor.withValues(alpha: opacity * 0.25),
+            primaryColor.withValues(alpha: 0.0),
           ],
         ).createShader(Rect.fromCircle(center: center, radius: currentRadius))
         ..style = PaintingStyle.fill;
@@ -69,8 +69,8 @@ class RadarPulsePainter extends CustomPainter {
         startAngle: 0.0,
         endAngle: math.pi / 2,
         colors: [
-          accentColor.withOpacity(0.28),
-          accentColor.withOpacity(0.0),
+          accentColor.withValues(alpha: 0.28),
+          accentColor.withValues(alpha: 0.0),
         ],
         transform: GradientRotation(sweepAngle - math.pi / 4),
       ).createShader(Rect.fromCircle(center: center, radius: maxRadius))
@@ -80,7 +80,7 @@ class RadarPulsePainter extends CustomPainter {
 
     // Glowing center beacon dot
     final centerGlow = Paint()
-      ..color = accentColor.withOpacity(0.3)
+      ..color = accentColor.withValues(alpha: 0.3)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
     canvas.drawCircle(center, 16, centerGlow);
 

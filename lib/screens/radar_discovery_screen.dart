@@ -1,8 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../data/mock_food_trucks.dart';
 import '../models/food_truck.dart';
 import '../services/location_service.dart';
+import '../services/supabase_service.dart';
 import '../widgets/radar_painter.dart';
 import 'truck_detail_screen.dart';
 
@@ -24,7 +24,8 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   double _scanRadiusMiles = 1.0;
-  bool _isScanning = true;
+  bool _isScanning = false;
+  List<FoodTruck> _trucks = [];
 
   @override
   void initState() {
@@ -33,6 +34,31 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2400),
     )..repeat();
+    _loadTrucks();
+  }
+
+  @override
+  void didUpdateWidget(covariant RadarDiscoveryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentLocation.latitude != widget.currentLocation.latitude ||
+        oldWidget.currentLocation.longitude != widget.currentLocation.longitude) {
+      _loadTrucks();
+    }
+  }
+
+  Future<void> _loadTrucks() async {
+    setState(() => _isScanning = true);
+    final results = await SupabaseService().fetchLiveTrucks(
+      userLat: widget.currentLocation.latitude,
+      userLng: widget.currentLocation.longitude,
+      radiusMiles: _scanRadiusMiles,
+    );
+    if (mounted) {
+      setState(() {
+        _trucks = results;
+        _isScanning = false;
+      });
+    }
   }
 
   @override
@@ -42,29 +68,21 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
   }
 
   void _triggerScan() {
-    setState(() => _isScanning = true);
     _pulseController.reset();
     _pulseController.repeat();
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() => _isScanning = false);
-      }
-    });
+    _loadTrucks();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Filter trucks within selected radius
-    final nearbyTrucks = kMockFoodTrucks.where((truck) {
-      return truck.distanceInMiles <= _scanRadiusMiles;
-    }).toList();
+    final theme = Theme.of(context);
+    final nearbyTrucks = _trucks.where((t) => t.distanceInMiles <= _scanRadiusMiles).toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1017),
       body: SafeArea(
         child: Stack(
           children: [
-            // Radar Proximity Canvas
+            // Radar Canvas
             Center(
               child: AnimatedBuilder(
                 animation: _pulseController,
@@ -73,57 +91,52 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
                     size: Size(MediaQuery.of(context).size.width, MediaQuery.of(context).size.width),
                     painter: RadarPulsePainter(
                       animationValue: _pulseController.value,
-                      primaryColor: const Color(0xFFFF6B00),
-                      accentColor: const Color(0xFFFFB800),
+                      primaryColor: theme.colorScheme.primary,
+                      accentColor: Colors.amber,
                     ),
                   );
                 },
               ),
             ),
 
-            // Pinned Food Trucks on the Radar (Pokémon GO map markers)
-            ..._buildTruckPins(nearbyTrucks),
+            // Food Truck Map Pins
+            ..._buildTruckPins(nearbyTrucks, theme),
 
-            // Top Header & Zomato/Blinkit Location Bar
+            // Top Header: Location Bar & Radius Selector
             Positioned(
-              top: 12,
+              top: 10,
               left: 16,
               right: 16,
               child: Column(
                 children: [
-                  _buildLocationHeader(),
-                  const SizedBox(height: 12),
-                  _buildRadiusSelector(),
+                  _buildLocationHeader(theme),
+                  const SizedBox(height: 10),
+                  _buildRadiusSelector(theme),
                 ],
               ),
             ),
 
-            // Scan Trigger Button (Pokémon GO Radar Scanner)
+            // Scan Trigger Button
             Positioned(
-              right: 20,
-              bottom: 240,
+              right: 16,
+              bottom: 230,
               child: FloatingActionButton.extended(
                 onPressed: _triggerScan,
-                backgroundColor: const Color(0xFFFF6B00),
-                elevation: 6,
+                backgroundColor: theme.colorScheme.primary,
                 icon: const Icon(Icons.radar, color: Colors.white),
                 label: Text(
                   _isScanning ? 'SCANNING...' : 'SCAN AREA',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
                 ),
               ),
             ),
 
-            // Bottom Drawer: "Nearby Trucks Scanned"
+            // Bottom Drawer: Scanned Trucks
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildBottomScannedDrawer(nearbyTrucks),
+              child: _buildBottomScannedDrawer(nearbyTrucks, theme),
             ),
           ],
         ),
@@ -131,32 +144,25 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
     );
   }
 
-  Widget _buildLocationHeader() {
+  Widget _buildLocationHeader(ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF161A24).withOpacity(0.92),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white12),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.dividerColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF6B00).withOpacity(0.18),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.location_on, color: Color(0xFFFF6B00), size: 18),
-          ),
-          const SizedBox(width: 12),
+          Icon(Icons.location_on, color: theme.colorScheme.primary, size: 20),
+          const SizedBox(width: 8),
           Expanded(
             child: InkWell(
               onTap: widget.onOpenLocationPicker,
@@ -165,21 +171,13 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
                 children: [
                   Row(
                     children: [
-                      Text(
-                        widget.currentLocation.label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6B00), size: 18),
+                      Text(widget.currentLocation.label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const Icon(Icons.keyboard_arrow_down, size: 16),
                     ],
                   ),
                   Text(
                     widget.currentLocation.formattedAddress,
-                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                    style: TextStyle(color: theme.hintColor, fontSize: 11),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -189,15 +187,14 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
           ),
           IconButton(
             onPressed: widget.onOpenLocationPicker,
-            icon: const Icon(Icons.my_location, color: Colors.white70, size: 20),
-            tooltip: 'Detect GPS',
+            icon: const Icon(Icons.my_location, size: 18),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRadiusSelector() {
+  Widget _buildRadiusSelector(ThemeData theme) {
     final radii = [0.5, 1.0, 2.5, 5.0];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -210,19 +207,11 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
               label: Text('$r mi radius'),
               selected: isSelected,
               onSelected: (selected) {
-                if (selected) setState(() => _scanRadiusMiles = r);
+                if (selected) {
+                  setState(() => _scanRadiusMiles = r);
+                  _loadTrucks();
+                }
               },
-              backgroundColor: const Color(0xFF161A24),
-              selectedColor: const Color(0xFFFF6B00),
-              labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.white60,
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-              side: BorderSide(
-                color: isSelected ? const Color(0xFFFF6B00) : Colors.white12,
-              ),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
           );
         }).toList(),
@@ -230,15 +219,14 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
     );
   }
 
-  List<Widget> _buildTruckPins(List<FoodTruck> trucks) {
+  List<Widget> _buildTruckPins(List<FoodTruck> trucks, ThemeData theme) {
     final center = MediaQuery.of(context).size.width / 2;
-    final maxRadius = center * 0.78;
+    final maxRadius = center * 0.76;
 
     return trucks.asMap().entries.map((entry) {
       final index = entry.key;
       final truck = entry.value;
 
-      // Calculate pseudo-polar position relative to user center
       final angle = (index * (2 * math.pi / (trucks.isEmpty ? 1 : trucks.length))) + 0.35;
       final distanceRatio = (truck.distanceInMiles / _scanRadiusMiles).clamp(0.2, 0.9);
       final r = maxRadius * distanceRatio;
@@ -258,69 +246,46 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: truck.isSponsored ? const Color(0xFFFFB800) : const Color(0xFF1E2330),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: truck.isSponsored ? Colors.amberAccent : const Color(0xFFFF6B00),
-                    width: 1.2,
-                  ),
+                  color: truck.isSponsored ? Colors.amber : theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: truck.isSponsored ? Colors.amberAccent : theme.colorScheme.primary),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (truck.isSponsored) ...[
-                      const Icon(Icons.flash_on, color: Colors.black, size: 10),
-                      const SizedBox(width: 2),
-                    ],
-                    Text(
-                      '${truck.distanceInMiles} mi',
-                      style: TextStyle(
-                        color: truck.isSponsored ? Colors.black : Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 3),
-              // Pin Icon with Pulsing Border
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF14171F),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: truck.status == TruckStatus.servingNow
-                        ? const Color(0xFF00E676)
-                        : const Color(0xFFFF9100),
-                    width: 2.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: (truck.status == TruckStatus.servingNow
-                              ? const Color(0xFF00E676)
-                              : const Color(0xFFFF9100))
-                          .withOpacity(0.4),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Text(
-                    _getCuisineEmoji(truck.cuisine),
-                    style: const TextStyle(fontSize: 20),
+                child: Text(
+                  '${truck.distanceInMiles} mi',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: truck.isSponsored ? Colors.black : theme.textTheme.bodyMedium?.color,
                   ),
                 ),
               ),
               const SizedBox(height: 2),
-              // Truck name
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: truck.status == TruckStatus.servingNow ? const Color(0xFF00C853) : const Color(0xFFFF9100),
+                    width: 2.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (truck.status == TruckStatus.servingNow ? const Color(0xFF00C853) : const Color(0xFFFF9100))
+                          .withValues(alpha: 0.35),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(_getCuisineEmoji(truck.cuisine), style: const TextStyle(fontSize: 20)),
+                ),
+              ),
+              const SizedBox(height: 2),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -329,11 +294,7 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
                 ),
                 child: Text(
                   truck.name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -343,19 +304,19 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
     }).toList();
   }
 
-  Widget _buildBottomScannedDrawer(List<FoodTruck> trucks) {
+  Widget _buildBottomScannedDrawer(List<FoodTruck> trucks, ThemeData theme) {
     return Container(
-      height: 220,
+      height: 210,
       padding: const EdgeInsets.only(top: 14, bottom: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF121620),
+        color: theme.colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: theme.dividerColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 20,
-            offset: const Offset(0, -6),
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
@@ -363,137 +324,104 @@ class _RadarDiscoveryScreenState extends State<RadarDiscoveryScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.radar, color: Color(0xFFFF6B00), size: 18),
+                    Icon(Icons.radar, color: theme.colorScheme.primary, size: 18),
                     const SizedBox(width: 8),
                     Text(
                       'Nearby Trucks Scanned (${trucks.length})',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF00E676).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
+                    color: const Color(0xFF00C853).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Text(
-                    'LIVE NOW',
-                    style: TextStyle(
-                      color: Color(0xFF00E676),
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    '● LIVE NOW',
+                    style: TextStyle(color: Color(0xFF00C853), fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: trucks.length,
-              itemBuilder: (context, index) {
-                final truck = trucks[index];
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => TruckDetailScreen(truck: truck)),
-                    );
-                  },
-                  child: Container(
-                    width: 280,
-                    margin: const EdgeInsets.only(right: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1A1F2C),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            truck.heroImageUrl,
-                            width: 76,
-                            height: 76,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              width: 76,
-                              height: 76,
-                              color: Colors.white12,
-                              child: const Icon(Icons.fastfood, color: Colors.white54),
-                            ),
+            child: trucks.isEmpty
+                ? Center(child: Text('No trucks detected in this range.', style: TextStyle(color: theme.hintColor, fontSize: 12)))
+                : ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: trucks.length,
+                    itemBuilder: (context, index) {
+                      final truck = trucks[index];
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => TruckDetailScreen(truck: truck)),
+                          );
+                        },
+                        child: Container(
+                          width: 250,
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: theme.cardTheme.color,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: theme.dividerColor),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          child: Row(
                             children: [
-                              Text(
-                                truck.name,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  truck.heroImageUrl,
+                                  width: 70,
+                                  height: 70,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.fastfood, size: 36),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                truck.cuisine,
-                                style: const TextStyle(color: Colors.white54, fontSize: 11),
-                                maxLines: 1,
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  const Icon(Icons.star, color: Color(0xFFFFB800), size: 14),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '${truck.rating}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      truck.name,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                  ),
-                                  const Spacer(),
-                                  Text(
-                                    '${truck.distanceInMiles} mi',
-                                    style: const TextStyle(
-                                      color: Color(0xFFFF6B00),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                                    const SizedBox(height: 2),
+                                    Text(truck.cuisine, style: TextStyle(color: theme.hintColor, fontSize: 11), maxLines: 1),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.star, color: Colors.amber, size: 13),
+                                        const SizedBox(width: 3),
+                                        Text('${truck.rating}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                        const Spacer(),
+                                        Text('${truck.distanceInMiles} mi', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 11)),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),

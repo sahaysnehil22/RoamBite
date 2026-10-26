@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../data/mock_food_trucks.dart';
 import '../models/food_truck.dart';
 import '../services/location_service.dart';
+import '../services/supabase_service.dart';
 import 'truck_detail_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
@@ -22,6 +22,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
   String _selectedCategory = 'All';
   bool _onlyOpenNow = false;
   final TextEditingController _searchController = TextEditingController();
+  List<FoodTruck> _trucks = [];
+  bool _isLoading = true;
 
   final List<String> _categories = [
     'All',
@@ -33,6 +35,35 @@ class _ExploreScreenState extends State<ExploreScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadTrucks();
+  }
+
+  @override
+  void didUpdateWidget(covariant ExploreScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentLocation.latitude != widget.currentLocation.latitude ||
+        oldWidget.currentLocation.longitude != widget.currentLocation.longitude) {
+      _loadTrucks();
+    }
+  }
+
+  Future<void> _loadTrucks() async {
+    setState(() => _isLoading = true);
+    final results = await SupabaseService().fetchLiveTrucks(
+      userLat: widget.currentLocation.latitude,
+      userLng: widget.currentLocation.longitude,
+    );
+    if (mounted) {
+      setState(() {
+        _trucks = results;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
@@ -40,15 +71,16 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final query = _searchController.text.toLowerCase();
 
-    final filteredTrucks = kMockFoodTrucks.where((truck) {
+    final filteredTrucks = _trucks.where((truck) {
       if (_onlyOpenNow && truck.status != TruckStatus.servingNow) return false;
-      if (_selectedCategory == '🌮 Tacos' && !truck.cuisine.contains('Taco')) return false;
-      if (_selectedCategory == '🍔 Burgers' && !truck.cuisine.contains('Burger')) return false;
-      if (_selectedCategory == '☕ Coffee & Sweet' && !truck.cuisine.contains('Coffee')) return false;
-      if (_selectedCategory == '🫓 Latin' && !truck.cuisine.contains('Latin')) return false;
-      if (_selectedCategory == '⭐ Top Rated' && truck.rating < 4.9) return false;
+      if (_selectedCategory == '🌮 Tacos' && !truck.cuisine.toLowerCase().contains('taco')) return false;
+      if (_selectedCategory == '🍔 Burgers' && !truck.cuisine.toLowerCase().contains('burger')) return false;
+      if (_selectedCategory == '☕ Coffee & Sweet' && !truck.cuisine.toLowerCase().contains('coffee')) return false;
+      if (_selectedCategory == '🫓 Latin' && !truck.cuisine.toLowerCase().contains('latin') && !truck.cuisine.toLowerCase().contains('arepa')) return false;
+      if (_selectedCategory == '⭐ Top Rated' && truck.rating < 4.8) return false;
 
       if (query.isNotEmpty) {
         final matchesName = truck.name.toLowerCase().contains(query);
@@ -60,40 +92,69 @@ class _ExploreScreenState extends State<ExploreScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1017),
       body: SafeArea(
         child: Column(
           children: [
-            // Top Zomato/Blinkit Location Header
-            _buildTopBar(),
+            // Top Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: widget.onOpenLocationPicker,
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, color: theme.colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      widget.currentLocation.label,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                    const Icon(Icons.keyboard_arrow_down, size: 16),
+                                  ],
+                                ),
+                                Text(
+                                  widget.currentLocation.formattedAddress,
+                                  style: TextStyle(color: theme.hintColor, fontSize: 11),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: widget.onOpenLocationPicker,
+                    icon: const Icon(Icons.my_location, size: 20),
+                  ),
+                ],
+              ),
+            ),
 
             // Search Bar
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: TextField(
                 controller: _searchController,
                 onChanged: (_) => setState(() {}),
-                style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  hintText: 'Search food trucks, dishes, or cuisines...',
-                  hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
-                  prefixIcon: const Icon(Icons.search, color: Color(0xFFFF6B00)),
-                  suffixIcon: query.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.white38),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {});
-                          },
-                        )
-                      : null,
+                  hintText: 'Search cuisine, dishes, trucks...',
+                  prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: const Color(0xFF191E2B),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  fillColor: theme.colorScheme.surface,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: theme.dividerColor)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: theme.dividerColor)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
             ),
@@ -116,72 +177,64 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       onSelected: (selected) {
                         if (selected) setState(() => _selectedCategory = cat);
                       },
-                      backgroundColor: const Color(0xFF191E2B),
-                      selectedColor: const Color(0xFFFF6B00),
-                      labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
-                        fontSize: 13,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                      ),
-                      side: BorderSide(
-                        color: isSelected ? const Color(0xFFFF6B00) : Colors.white12,
-                      ),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
                   );
                 },
               ),
             ),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
-            // Regional Filter Pills
+            // Count & Filter Toggle
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   Text(
                     '${widget.currentLocation.city}, ${widget.currentLocation.state} (${filteredTrucks.length} Trucks)',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                   const Spacer(),
                   FilterChip(
-                    label: const Text('Serving Now'),
+                    label: const Text('Live Now'),
                     selected: _onlyOpenNow,
-                    onSelected: (val) => setState(() => _onlyOpenNow = val),
-                    backgroundColor: const Color(0xFF191E2B),
-                    selectedColor: const Color(0xFF00E676).withOpacity(0.2),
-                    labelStyle: TextStyle(
-                      color: _onlyOpenNow ? const Color(0xFF00E676) : Colors.white60,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    side: BorderSide(
-                      color: _onlyOpenNow ? const Color(0xFF00E676) : Colors.white12,
-                    ),
+                    onSelected: (v) => setState(() => _onlyOpenNow = v),
+                    selectedColor: const Color(0xFF00C853).withValues(alpha: 0.2),
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
-            // Truck Cards List (DoorDash / Zomato style)
+            // Truck Cards List
             Expanded(
-              child: filteredTrucks.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      itemCount: filteredTrucks.length,
-                      itemBuilder: (context, index) {
-                        final truck = filteredTrucks[index];
-                        return _buildDoorDashCard(truck);
-                      },
-                    ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filteredTrucks.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.search_off, size: 48, color: Colors.grey),
+                              const SizedBox(height: 10),
+                              const Text('No food trucks found matching filter', style: TextStyle(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Text('Try clearing filters or switching location', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _loadTrucks,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            itemCount: filteredTrucks.length,
+                            itemBuilder: (context, index) {
+                              final truck = filteredTrucks[index];
+                              return _buildTruckCard(truck, theme);
+                            },
+                          ),
+                        ),
             ),
           ],
         ),
@@ -189,66 +242,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
     );
   }
 
-  Widget _buildTopBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: InkWell(
-              onTap: widget.onOpenLocationPicker,
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B00).withOpacity(0.18),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.location_on, color: Color(0xFFFF6B00), size: 18),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              widget.currentLocation.label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6B00), size: 18),
-                          ],
-                        ),
-                        Text(
-                          widget.currentLocation.formattedAddress,
-                          style: const TextStyle(color: Colors.white38, fontSize: 11),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          IconButton(
-            onPressed: widget.onOpenLocationPicker,
-            icon: const Icon(Icons.my_location, color: Colors.white70),
-            tooltip: 'Detect GPS',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDoorDashCard(FoodTruck truck) {
+  Widget _buildTruckCard(FoodTruck truck, ThemeData theme) {
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -258,107 +252,47 @@ class _ExploreScreenState extends State<ExploreScreen> {
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
-          color: const Color(0xFF161A24),
+          color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: theme.dividerColor),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Hero Image with Badges
             Stack(
               children: [
                 Image.network(
                   truck.heroImageUrl,
-                  height: 180,
+                  height: 170,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 180,
-                    color: Colors.white12,
-                    child: const Center(child: Icon(Icons.fastfood, size: 48, color: Colors.white24)),
-                  ),
+                  errorBuilder: (context, error, stackTrace) => Container(height: 170, color: Colors.grey[300]),
                 ),
-                // Gradient Shadow
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withOpacity(0.3),
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.7),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                // Live Status Badge
                 Positioned(
-                  top: 12,
-                  left: 12,
+                  top: 10,
+                  left: 10,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: truck.status == TruckStatus.servingNow
-                          ? const Color(0xFF00E676)
+                          ? const Color(0xFF00C853)
                           : const Color(0xFFFF9100),
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.4),
-                          blurRadius: 8,
-                        ),
-                      ],
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          truck.status == TruckStatus.servingNow ? Icons.check_circle : Icons.navigation,
-                          size: 13,
-                          color: Colors.black,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          truck.status == TruckStatus.servingNow ? 'SERVING NOW' : 'ON THE MOVE',
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      truck.status == TruckStatus.servingNow ? '🟢 SERVING NOW' : '🚚 ON THE MOVE',
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
-                // Verified Time badge
                 Positioned(
-                  bottom: 12,
-                  left: 12,
+                  bottom: 10,
+                  right: 10,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.black87,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '📍 ${truck.lastConfirmed}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ),
-                // Distance badge
-                Positioned(
-                  bottom: 12,
-                  right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B00),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -369,8 +303,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
               ],
             ),
-
-            // Card Body
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -382,34 +314,22 @@ class _ExploreScreenState extends State<ExploreScreen> {
                       Expanded(
                         child: Text(
                           truck.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFB800).withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.amber.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.star, color: Color(0xFFFFB800), size: 14),
+                            const Icon(Icons.star, color: Colors.amber, size: 14),
                             const SizedBox(width: 4),
                             Text(
                               '${truck.rating}',
-                              style: const TextStyle(
-                                color: Color(0xFFFFB800),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Text(
-                              ' (${truck.reviewCount})',
-                              style: const TextStyle(color: Colors.white54, fontSize: 11),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                             ),
                           ],
                         ),
@@ -418,32 +338,25 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${truck.cuisine} • ${truck.priceRange} • Open until ${truck.closesAt}',
-                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                    '${truck.cuisine} • ${truck.priceRange} • ${truck.city}',
+                    style: TextStyle(color: theme.hintColor, fontSize: 12),
                   ),
-                  const SizedBox(height: 10),
-
-                  // Signature Dish Banner
                   if (truck.menu.isNotEmpty) ...[
+                    const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E2332),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.06)),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.thumb_up_alt_outlined, color: Color(0xFFFF6B00), size: 16),
-                          const SizedBox(width: 8),
+                          Icon(Icons.restaurant, color: theme.colorScheme.primary, size: 14),
+                          const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              'Best Dish: ${truck.menu.firstWhere((m) => m.isSignature, orElse: () => truck.menu.first).name} (\$${truck.menu.first.price.toStringAsFixed(2)})',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              'Featured: ${truck.menu.first.name} (\$${truck.menu.first.price.toStringAsFixed(2)})',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -457,41 +370,6 @@ class _ExploreScreenState extends State<ExploreScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.search_off, size: 56, color: Colors.white24),
-          const SizedBox(height: 12),
-          const Text(
-            'No food trucks found matching filter',
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Try widening your radius or clearing search query',
-            style: TextStyle(color: Colors.white38, fontSize: 13),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _selectedCategory = 'All';
-                _onlyOpenNow = false;
-                _searchController.clear();
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF6B00),
-            ),
-            child: const Text('Reset Filters'),
-          ),
-        ],
       ),
     );
   }
