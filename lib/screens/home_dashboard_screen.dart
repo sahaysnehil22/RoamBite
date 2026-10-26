@@ -2,7 +2,7 @@ import 'profile_screen.dart';
 import 'package:flutter/material.dart';
 import '../models/food_truck.dart';
 import '../services/location_service.dart';
-import '../services/supabase_service.dart';
+import '../services/supabase_service.dart'; import '../services/demo_trucks.dart'; import '../widgets/service_area_gate.dart';
 import 'truck_detail_screen.dart';
 
 // Slice 2: Zomato-style foodie dashboard.
@@ -13,13 +13,13 @@ import 'truck_detail_screen.dart';
 class HomeDashboardScreen extends StatefulWidget {
   final UserLocation currentLocation;
   final VoidCallback onOpenLocationPicker;
-  final VoidCallback onSwitchToRadar;
+  final VoidCallback onSwitchToRadar; final VoidCallback? onBrowseMiamiDemo;
 
   const HomeDashboardScreen({
     super.key,
     required this.currentLocation,
     required this.onOpenLocationPicker,
-    required this.onSwitchToRadar,
+    required this.onSwitchToRadar, this.onBrowseMiamiDemo,
   });
 
   @override
@@ -30,7 +30,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   final TextEditingController _searchController = TextEditingController();
   final PageController _promoController = PageController();
   List<FoodTruck> _trucks = [];
-  bool _isLoading = true;
+  bool _isLoading = true; bool _isDemoFallback = false;
   String _selectedCuisine = 'All';
   bool _openNowOnly = false;
   bool _nearMeOnly = false;
@@ -57,14 +57,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   Future<void> _loadTrucks() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    if (!LocationService.isInServiceArea(widget.currentLocation)) { if (mounted) { setState(() { _trucks = []; _isLoading = false; _isDemoFallback = false; }); } return; } if (!SupabaseConfig.isConfigured) { if (mounted) { setState(() { _trucks = DemoTrucks.forLocation(userLat: widget.currentLocation.latitude, userLng: widget.currentLocation.longitude); _isLoading = false; _isDemoFallback = true; }); } return; } setState(() => _isLoading = true);
     final results = await SupabaseService().fetchLiveTrucks(
       userLat: widget.currentLocation.latitude,
       userLng: widget.currentLocation.longitude,
     );
     if (mounted) {
       setState(() {
-        _trucks = results;
+        _trucks = results.isEmpty ? DemoTrucks.forLocation(userLat: widget.currentLocation.latitude, userLng: widget.currentLocation.longitude) : results.where((t) => t.distanceInMiles <= LocationService.kServiceRadiusMiles).toList(); _isDemoFallback = results.isEmpty;
         _isLoading = false;
       });
     }
@@ -108,7 +108,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) { if (!LocationService.isInServiceArea(widget.currentLocation)) { return Scaffold(body: SafeArea(child: ServiceAreaGate(location: widget.currentLocation, onBrowseMiamiDemo: widget.onBrowseMiamiDemo ?? () {}, onChangeLocation: widget.onOpenLocationPicker))); }
     final theme = Theme.of(context);
     final query = _searchController.text.toLowerCase();
 
@@ -379,7 +379,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ),
                 ),
               ),
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              if (_isDemoFallback) SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(12)), child: const Text('Showing Miami demo trucks because live data is unavailable right now.', style: TextStyle(color: Colors.white, fontSize: 12))))), const SliverToBoxAdapter(child: SizedBox(height: 16)),
               // Live & Serving Right Now Section
               SliverToBoxAdapter(
                 child: Padding(
