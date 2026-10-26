@@ -16,7 +16,7 @@ class FoodieShell extends StatefulWidget {
 class _FoodieShellState extends State<FoodieShell> {
   // Phase 1: Cold start lands on Home (Index 0), NEVER on radar/scan
   int _currentIndex = 0;
-  UserLocation _currentLocation = UserLocation.defaultMiami;
+  UserLocation _currentLocation = UserLocation.defaultMiami; // Slice 4: demo logins land on the Miami hub.
 
   void _openLocationPicker() {
     showModalBottomSheet(
@@ -33,7 +33,7 @@ class _FoodieShellState extends State<FoodieShell> {
   }
 
   void _switchToRadarTab() {
-    setState(() => _currentIndex = 2); // Radar is Tab Index 2
+    setState(() => _currentIndex = 2); } void _browseMiamiDemo() { setState(() { _currentLocation = UserLocation.defaultMiami; _currentIndex = 0; }); // Radar is Tab Index 2
   }
 
   @override
@@ -42,7 +42,7 @@ class _FoodieShellState extends State<FoodieShell> {
       HomeDashboardScreen(
         currentLocation: _currentLocation,
         onOpenLocationPicker: _openLocationPicker,
-        onSwitchToRadar: _switchToRadarTab,
+        onSwitchToRadar: _switchToRadarTab, onBrowseMiamiDemo: _browseMiamiDemo,
       ),
       ExploreScreen(
         currentLocation: _currentLocation,
