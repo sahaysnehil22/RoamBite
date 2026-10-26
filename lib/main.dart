@@ -60,28 +60,18 @@ class RootGatekeeper extends StatelessWidget {
     // Loading / Splash state
     if (auth.isLoading) {
       return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: Image.asset(
-                  'assets/images/roambite_logo.jpg',
-                  width: 80,
-                  height: 80,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.local_shipping, size: 48),
-                ),
-              ),
-              const SizedBox(height: 18),
-              const Text('RoamBite', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-              const SizedBox(height: 12),
-              const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
-            ],
-          ),
-        ),
-      );
+                backgroundColor: Color(0xFFFF5722),
+                body: Center(
+                            child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                                          Image.asset('assets/images/roambite_splash.png', width: 280, fit: BoxFit.contain),
+                                                          const SizedBox(height: 24),
+                                                          const CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                                        ],
+                                        ),
+                          ),
+              );
     }
 
     // Unauthenticated user -> Auth Screen (Phase 2)
