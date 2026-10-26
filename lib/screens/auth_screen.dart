@@ -109,7 +109,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: Image.asset(
-                    'assets/images/roambite_logo.jpg',
+                    'assets/images/roambite_logo_white.png',
                     width: 90,
                     height: 90,
                     fit: BoxFit.cover,
