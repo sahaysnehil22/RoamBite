@@ -323,37 +323,170 @@ class SupabaseService {
       final str = prefs.getString(_kOfflineTrucksCacheKey);
       if (str != null) {
         final list = jsonDecode(str) as List<dynamic>;
-        return list.map((m) {
-          final lat = (m['latitude'] as num).toDouble();
-          final lng = (m['longitude'] as num).toDouble();
-          final dist = LocationService.calculateDistanceInMiles(userLat, userLng, lat, lng);
-          return FoodTruck(
-            id: m['id'],
-            name: m['name'],
-            tagline: m['tagline'] ?? '',
-            cuisine: m['cuisine'] ?? '',
-            rating: (m['rating'] as num?)?.toDouble() ?? 5.0,
-            reviewCount: (m['reviewCount'] as num?)?.toInt() ?? 0,
-            priceRange: m['priceRange'] ?? '\$',
-            latitude: lat,
-            longitude: lng,
-            address: m['address'] ?? '',
-            city: m['city'] ?? '',
-            state: m['state'] ?? '',
-            status: m['status'] == 'serving_now' ? TruckStatus.servingNow : TruckStatus.onTheMove,
-            lastConfirmed: m['lastConfirmed'] ?? 'Cached',
-            closesAt: '11:00 PM',
-            heroImageUrl: m['heroImageUrl'] ?? '',
-            menu: const [],
-            videoReviews: const [],
-            isSponsored: m['isSponsored'] == true,
-            distanceInMiles: double.parse(dist.toStringAsFixed(1)),
-          );
-        }).toList();
+        if (list.isNotEmpty) {
+          return list.map((m) {
+            final lat = (m['latitude'] as num).toDouble();
+            final lng = (m['longitude'] as num).toDouble();
+            final dist = LocationService.calculateDistanceInMiles(userLat, userLng, lat, lng);
+            return FoodTruck(
+              id: m['id'],
+              name: m['name'],
+              tagline: m['tagline'] ?? '',
+              cuisine: m['cuisine'] ?? '',
+              rating: (m['rating'] as num?)?.toDouble() ?? 5.0,
+              reviewCount: (m['reviewCount'] as num?)?.toInt() ?? 0,
+              priceRange: m['priceRange'] ?? '\$',
+              latitude: lat,
+              longitude: lng,
+              address: m['address'] ?? '',
+              city: m['city'] ?? '',
+              state: m['state'] ?? '',
+              status: m['status'] == 'serving_now' ? TruckStatus.servingNow : TruckStatus.onTheMove,
+              lastConfirmed: m['lastConfirmed'] ?? 'Cached',
+              closesAt: '11:00 PM',
+              heroImageUrl: m['heroImageUrl'] ?? '',
+              menu: const [],
+              videoReviews: const [],
+              isSponsored: m['isSponsored'] == true,
+              distanceInMiles: double.parse(dist.toStringAsFixed(1)),
+            );
+          }).toList();
+        }
       }
     } catch (e) {
       debugPrint('Error reading cached trucks: $e');
     }
-    return [];
+    return _defaultDemoTrucks(userLat, userLng);
+  }
+
+  static List<FoodTruck> _defaultDemoTrucks(double userLat, double userLng) {
+    return [
+      FoodTruck(
+        id: 'a1111111-aaaa-1111-aaaa-111111111111',
+        name: 'Taco Trail',
+        tagline: 'Authentic Jalisco street tacos & melted birria',
+        cuisine: 'Mexican • Tacos',
+        rating: 4.9,
+        reviewCount: 841,
+        priceRange: '\$',
+        latitude: userLat + 0.003,
+        longitude: userLng + 0.003,
+        address: '2407 NW 2nd Ave',
+        city: 'Miami',
+        state: 'FL',
+        status: TruckStatus.servingNow,
+        lastConfirmed: 'Just now',
+        closesAt: '11:00 PM',
+        heroImageUrl: 'https://images.unsplash.com/photo-1565123409695-7b5ef63a2efb?auto=format&fit=crop&w=1200&q=80',
+        isSponsored: true,
+        distanceInMiles: 0.4,
+        menu: const [
+          MenuItem(
+            id: 'm1',
+            name: 'Crispy Quesabirria Tacos',
+            description: 'Birria, Cheese, Consomé',
+            price: 12.99,
+            imageUrl: 'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=600&q=80',
+            isSignature: true,
+          ),
+          MenuItem(
+            id: 'm2',
+            name: 'Spicy Al Pastor',
+            description: 'Pineapple, Cilantro, Salsa',
+            price: 10.50,
+            imageUrl: 'https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=600&q=80',
+            isSignature: true,
+          ),
+          MenuItem(
+            id: 'm3',
+            name: 'Chorizo Queso Fries',
+            description: 'Loaded spicy fries with queso fresco',
+            price: 9.75,
+            imageUrl: 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=600&q=80',
+            isSignature: true,
+          ),
+          MenuItem(
+            id: 'm4',
+            name: 'Horchata',
+            description: 'Traditional sweetened rice milk with cinnamon',
+            price: 4.50,
+            imageUrl: 'https://images.unsplash.com/photo-1556881286-fc6915169721?auto=format&fit=crop&w=600&q=80',
+            isSignature: false,
+          ),
+        ],
+        videoReviews: const [
+          VideoReview(
+            id: 'v1',
+            userName: 'Maya V',
+            userAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80',
+            rating: 4.8,
+            quote: 'Crispiest Birria in Wynwood! 😍',
+            thumbnailUrl: 'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=600&q=80',
+            videoUrl: '',
+            timeAgo: '2h ago',
+          ),
+          VideoReview(
+            id: 'v2',
+            userName: 'Alex_C',
+            userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+            rating: 4.9,
+            quote: 'Absolute Must-Try!',
+            thumbnailUrl: 'https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=600&q=80',
+            videoUrl: '',
+            timeAgo: '4h ago',
+          ),
+          VideoReview(
+            id: 'v3',
+            userName: 'FoodieJess',
+            userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+            rating: 5.0,
+            quote: 'Incredible flavor! The Al Pastor is amazing.',
+            thumbnailUrl: 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&w=600&q=80',
+            videoUrl: '',
+            timeAgo: '1d ago',
+          ),
+        ],
+      ),
+      FoodTruck(
+        id: 'a2222222-aaaa-2222-aaaa-222222222222',
+        name: 'Burger Bus Co.',
+        tagline: 'Double smash burgers with butter-toasted brioche',
+        cuisine: 'American • Burgers',
+        rating: 4.8,
+        reviewCount: 620,
+        priceRange: '\$\$',
+        latitude: userLat - 0.004,
+        longitude: userLng + 0.002,
+        address: '2600 NW Miami Ct',
+        city: 'Miami',
+        state: 'FL',
+        status: TruckStatus.servingNow,
+        lastConfirmed: '5 mins ago',
+        closesAt: '10:00 PM',
+        heroImageUrl: 'https://images.unsplash.com/photo-1525164286253-04e68b9d94c6?auto=format&fit=crop&w=1200&q=80',
+        isSponsored: false,
+        distanceInMiles: 0.6,
+        menu: const [
+          MenuItem(
+            id: 'bm1',
+            name: 'The Wynwood Double Smash',
+            description: 'Double Angus beef patties, American cheese, special sauce',
+            price: 13.50,
+            imageUrl: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
+            isSignature: true,
+          ),
+          MenuItem(
+            id: 'bm2',
+            name: 'Truffle Parmesan Fries',
+            description: 'Crispy skin-on fries tossed in white truffle oil',
+            price: 7.00,
+            imageUrl: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=600&q=80',
+            isSignature: true,
+          ),
+        ],
+        videoReviews: const [],
+      ),
+    ];
   }
 }
+
