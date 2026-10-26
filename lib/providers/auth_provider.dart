@@ -1,5 +1,8 @@
+import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 
 enum UserRole { foodie, truckOwner }
@@ -12,6 +15,10 @@ class AuthProvider extends ChangeNotifier {
   String? _phoneNumber;
   String? _email;
   String? _displayName;
+  UserRole? _pendingGoogleRole;
+  StreamSubscription<AuthState>? _authSubscription;
+  StreamSubscription<Uri>? _linkSubscription;
+  final AppLinks _appLinks = AppLinks();
 
   bool get isLoading => _isLoading;
   bool get isSignedIn => _isSignedIn;
@@ -23,7 +30,141 @@ class AuthProvider extends ChangeNotifier {
   String? get displayName => _displayName;
 
   AuthProvider() {
+    _listenToAuthChanges();
+    _listenToDeepLinks();
     _checkInitialAuth();
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Listen for Supabase auth events so a Google sign-in that completes in
+  /// the browser lands in the app without an app restart.
+  void _listenToAuthChanges() {
+    try {
+      final client = SupabaseService().client;
+      if (client == null) return;
+      _authSubscription = client.auth.onAuthStateChange.listen((data) async {
+        if (data.event == AuthChangeEvent.signedIn ||
+            data.event == AuthChangeEvent.tokenRefreshed) {
+          final user = data.session?.user;
+          if (user != null) {
+            await _applySupabaseUser(user);
+          }
+        } else if (data.event == AuthChangeEvent.signedOut) {
+          _isSignedIn = false;
+          _isLoading = false;
+          notifyListeners();
+        }
+      });
+    } catch (e) {
+      debugPrint('Auth state listener error: $e');
+    }
+  }
+
+  /// Listen for the OAuth return link, both while the app is running and
+  /// as the initial link when the app is (re)launched from the browser.
+  void _listenToDeepLinks() {
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      _handleLoginCallback,
+      onError: (Object e) => debugPrint('Deep link error: $e'),
+    );
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handleLoginCallback(uri);
+    }).catchError((Object e) {
+      debugPrint('Initial link error: $e');
+    });
+  }
+
+  /// Handle com.roambite.roambite://login-callback: exchange a PKCE code
+  /// when one is present, otherwise re-check/refresh the Supabase session,
+  /// then apply the signed-in user in the same session.
+  Future<void> _handleLoginCallback(Uri uri) async {
+    if (uri.scheme != 'com.roambite.roambite' ||
+        uri.host != 'login-callback') {
+      return;
+    }
+    final client = SupabaseService().client;
+    if (client == null) return;
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final code = uri.queryParameters['code'];
+      if (code != null && code.isNotEmpty) {
+        try {
+          final exchanged = await client.auth.exchangeCodeForSession(code);
+          final exchangedUser = exchanged.session?.user;
+          if (exchangedUser != null) {
+            await _applySupabaseUser(exchangedUser);
+            return;
+          }
+        } catch (e) {
+          debugPrint(
+              'OAuth code exchange failed, falling back to session check: $e');
+        }
+      }
+      var user = client.auth.currentUser;
+      if (user == null) {
+        try {
+          final refreshed = await client.auth.refreshSession();
+          user = refreshed.session?.user ?? client.auth.currentUser;
+        } catch (_) {
+          user = client.auth.currentUser;
+        }
+      }
+      if (user != null) {
+        await _applySupabaseUser(user);
+      }
+    } catch (e) {
+      debugPrint('Login callback handling error: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Apply a Supabase user to this provider, persisting the session the
+  /// same way the startup check does, and persisting the role the user
+  /// picked for a Google sign-in.
+  Future<void> _applySupabaseUser(User user) async {
+    _isSignedIn = true;
+    _userId = user.id;
+    _phoneNumber = user.phone;
+    _email = user.email;
+    var role = _role;
+    final serverRole = await SupabaseService().getUserRole(user.id);
+    if (serverRole != null) {
+      role = serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+    }
+    final metadata = user.userMetadata;
+    final metadataName = metadata == null
+        ? null
+        : (metadata['full_name'] ?? metadata['name']);
+    final name = metadataName is String && metadataName.isNotEmpty
+        ? metadataName
+        : (_displayName ?? 'RoamBite Member');
+    final pendingRole = _pendingGoogleRole;
+    if (pendingRole != null) {
+      role = pendingRole;
+      _pendingGoogleRole = null;
+      final roleStr = role == UserRole.truckOwner ? 'truck_owner' : 'foodie';
+      try {
+        await SupabaseService().setProfileRole(
+          userId: user.id,
+          role: roleStr,
+          displayName: name,
+        );
+      } catch (e) {
+        debugPrint('Persisting Google role failed: $e');
+      }
+    }
+    await _setLocalSession(id: user.id, role: role, name: name);
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> _checkInitialAuth() async {
@@ -35,10 +176,12 @@ class AuthProvider extends ChangeNotifier {
       final savedSignedIn = prefs.getBool('roambite_signed_in') ?? false;
       final savedRoleStr = prefs.getString('roambite_user_role') ?? 'foodie';
       _userId = prefs.getString('roambite_user_id') ?? 'local_user';
-      _displayName = prefs.getString('roambite_display_name') ?? 'RoamBite Member';
+      _displayName =
+          prefs.getString('roambite_display_name') ?? 'RoamBite Member';
 
       _isSignedIn = savedSignedIn;
-      _role = savedRoleStr == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+      _role =
+          savedRoleStr == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
 
       // Verify with Supabase if configured
       final supaClient = SupabaseService().client;
@@ -50,7 +193,9 @@ class AuthProvider extends ChangeNotifier {
         _email = current.email;
         final serverRole = await SupabaseService().getUserRole(current.id);
         if (serverRole != null) {
-          _role = serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+          _role = serverRole == 'truck_owner'
+              ? UserRole.truckOwner
+              : UserRole.foodie;
         }
       }
     } catch (e) {
@@ -68,6 +213,13 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (SupabaseConfig.isConfigured) {
+        // Remember the picked role so the OAuth return can persist it,
+        // exactly as the phone-OTP path does via setProfileRole.
+        _pendingGoogleRole = selectedRole;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+            'roambite_user_role',
+            selectedRole == UserRole.truckOwner ? 'truck_owner' : 'foodie');
         await SupabaseService().signInWithGoogle();
       } else {
         // Fallback for demo when backend credentials are pending
@@ -77,6 +229,9 @@ class AuthProvider extends ChangeNotifier {
           name: 'Google User',
         );
       }
+    } catch (e) {
+      _pendingGoogleRole = null;
+      rethrow;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -110,10 +265,12 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (SupabaseConfig.isConfigured && _phoneNumber != null) {
-        final res = await SupabaseService().verifyPhoneOtp(phone: _phoneNumber!, token: token);
+        final res = await SupabaseService()
+            .verifyPhoneOtp(phone: _phoneNumber!, token: token);
         if (res.user != null) {
           _userId = res.user!.id;
-          final roleStr = chosenRole == UserRole.truckOwner ? 'truck_owner' : 'foodie';
+          final roleStr =
+              chosenRole == UserRole.truckOwner ? 'truck_owner' : 'foodie';
           await SupabaseService().setProfileRole(
             userId: res.user!.id,
             role: roleStr,
@@ -122,10 +279,13 @@ class AuthProvider extends ChangeNotifier {
         }
       }
 
+      _pendingGoogleRole = null;
       await _setLocalSession(
         id: _userId ?? 'phone_user_${DateTime.now().millisecondsSinceEpoch}',
         role: chosenRole,
-        name: chosenRole == UserRole.truckOwner ? 'Food Truck Partner' : 'Foodie Explorer',
+        name: chosenRole == UserRole.truckOwner
+            ? 'Food Truck Partner'
+            : 'Foodie Explorer',
       );
     } finally {
       _isLoading = false;
@@ -138,10 +298,15 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    _pendingGoogleRole = null;
     await _setLocalSession(
-      id: chosenRole == UserRole.truckOwner ? 'demo_owner_111' : 'demo_foodie_222',
+      id: chosenRole == UserRole.truckOwner
+          ? 'demo_owner_111'
+          : 'demo_foodie_222',
       role: chosenRole,
-      name: chosenRole == UserRole.truckOwner ? 'Taco Trail Partner' : 'Miami Foodie',
+      name: chosenRole == UserRole.truckOwner
+          ? 'Taco Trail Partner'
+          : 'Miami Foodie',
     );
 
     _isLoading = false;
@@ -160,7 +325,8 @@ class AuthProvider extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('roambite_signed_in', true);
-    await prefs.setString('roambite_user_role', role == UserRole.truckOwner ? 'truck_owner' : 'foodie');
+    await prefs.setString('roambite_user_role',
+        role == UserRole.truckOwner ? 'truck_owner' : 'foodie');
     await prefs.setString('roambite_user_id', id);
     await prefs.setString('roambite_display_name', name);
   }
@@ -169,6 +335,7 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    _pendingGoogleRole = null;
     await SupabaseService().signOut();
     _isSignedIn = false;
     _userId = null;
