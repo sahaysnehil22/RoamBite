@@ -182,7 +182,7 @@ class _AuthScreenState extends State<AuthScreen> {
               OutlinedButton.icon(
                 onPressed: auth.isLoading
                     ? null
-                    : () => context.read<AuthProvider>().signInWithGoogle(_selectedRole),
+                    : () async { setState(() => _errorMessage = null); try { await context.read<AuthProvider>().signInWithGoogle(_selectedRole); } catch (e) { if (mounted) { setState(() => _errorMessage = e.toString().replaceAll('Exception: ', '')); } } },
                 icon: const Icon(Icons.g_mobiledata, size: 28),
                 label: const Text('Continue with Google'),
                 style: OutlinedButton.styleFrom(
