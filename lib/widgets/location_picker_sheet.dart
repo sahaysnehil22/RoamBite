@@ -17,25 +17,25 @@ class LocationPickerSheet extends StatefulWidget {
 
 class _LocationPickerSheetState extends State<LocationPickerSheet> {
   bool _isDetectingGps = false;
-  String? _errorMessage;
+  String? _errorMessage; LocationFailure? _locationFailure; UserLocation? _lastKnownLocation;
   final TextEditingController _searchController = TextEditingController();
 
   Future<void> _handleGpsDetect() async {
     setState(() {
       _isDetectingGps = true;
-      _errorMessage = null;
+      _errorMessage = null; _locationFailure = null; _lastKnownLocation = null;
     });
 
     try {
-      final detected = await LocationService().getCurrentGpsLocation();
+      final result = await LocationService().getCurrentGpsLocationWithFallback(); if (!mounted) return; if (result.location != null && !result.usedLastKnown) { widget.onLocationSelected(result.location!); Navigator.of(context).pop(); return; } setState(() { _isDetectingGps = false; _errorMessage = result.failure?.message ?? 'Location is unavailable right now.'; _locationFailure = result.failure; _lastKnownLocation = result.usedLastKnown ? result.location : null; }); return;
       if (!mounted) return;
-      widget.onLocationSelected(detected);
+      // GPS fallback is handled above.
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isDetectingGps = false;
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
+        _errorMessage = e.toString().replaceAll('Exception: ', ''); _locationFailure = e is LocationFailure ? e : null; _lastKnownLocation = null;
       });
     }
   }
@@ -161,7 +161,7 @@ class _LocationPickerSheetState extends State<LocationPickerSheet> {
             const SizedBox(height: 8),
             Text(
               _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+              style: const TextStyle(color: Colors.redAccent, fontSize: 12), ), if (_locationFailure != null && _locationFailure!.canOpenSettings) TextButton(onPressed: () { final failure = _locationFailure; if (failure != null) { LocationService().openSettingsForFailure(failure); } }, child: const Text('Open location settings')), if (_lastKnownLocation != null) TextButton(onPressed: () { final lastKnown = _lastKnownLocation; if (lastKnown != null) { widget.onLocationSelected(lastKnown); Navigator.of(context).pop(); } }, child: const Text('Use last known location')), const Text('Or pick a location from the list below.', style: TextStyle(color: Colors.redAccent, fontSize: 12)
             ),
           ],
 
