@@ -1,3 +1,4 @@
+import 'profile_screen.dart';
 import 'package:flutter/material.dart';
 import '../models/food_truck.dart';
 import '../services/location_service.dart';
@@ -201,6 +202,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         icon: const Icon(Icons.my_location, size: 20),
                         tooltip: 'Use GPS Location',
                       ),
+                      IconButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen())), icon: const Icon(Icons.account_circle, size: 28), tooltip: 'Profile', color: theme.colorScheme.primary),
                     ],
                   ),
                 ),

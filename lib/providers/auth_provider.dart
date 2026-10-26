@@ -10,6 +10,7 @@ class AuthProvider extends ChangeNotifier {
   UserRole _role = UserRole.foodie;
   String? _userId;
   String? _phoneNumber;
+  String? _email;
   String? _displayName;
 
   bool get isLoading => _isLoading;
@@ -18,6 +19,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isTruckOwner => _role == UserRole.truckOwner;
   String? get userId => _userId;
   String? get phoneNumber => _phoneNumber;
+  String? get email => _email;
   String? get displayName => _displayName;
 
   AuthProvider() {
@@ -45,6 +47,7 @@ class AuthProvider extends ChangeNotifier {
         _isSignedIn = true;
         _userId = current.id;
         _phoneNumber = current.phone;
+        _email = current.email;
         final serverRole = await SupabaseService().getUserRole(current.id);
         if (serverRole != null) {
           _role = serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
@@ -170,6 +173,7 @@ class AuthProvider extends ChangeNotifier {
     _isSignedIn = false;
     _userId = null;
     _phoneNumber = null;
+    _email = null;
     _displayName = null;
     _role = UserRole.foodie;
 

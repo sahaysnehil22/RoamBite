@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/location_service.dart';
+import 'profile_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserLocation currentLocation;
@@ -36,7 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
-          // Account Profile Card
+          // Account Profile Card - taps through to the Profile screen.
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -44,52 +45,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: theme.dividerColor),
             ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: theme.colorScheme.primary,
-                  child: Text(
-                    auth.isTruckOwner ? '🚚' : '🍔',
-                    style: const TextStyle(fontSize: 24),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                );
+              },
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: theme.colorScheme.primary,
+                    child: Text(
+                      auth.isTruckOwner ? '🚚' : '🍔',
+                      style: const TextStyle(fontSize: 24),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        auth.displayName ?? 'RoamBite Member',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      const SizedBox(height: 2),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: (auth.isTruckOwner ? const Color(0xFF00C853) : theme.colorScheme.primary)
-                              .withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          auth.displayName ?? 'RoamBite Member',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
-                        child: Text(
-                          auth.isTruckOwner ? 'TRUCK OWNER / PARTNER' : 'FOODIE EXPLORER',
-                          style: TextStyle(
-                            color: auth.isTruckOwner ? const Color(0xFF00C853) : theme.colorScheme.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
+                        const SizedBox(height: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (auth.isTruckOwner ? const Color(0xFF00C853) : theme.colorScheme.primary)
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            auth.isTruckOwner ? 'TRUCK OWNER / PARTNER' : 'FOODIE EXPLORER',
+                            style: TextStyle(
+                              color: auth.isTruckOwner ? const Color(0xFF00C853) : theme.colorScheme.primary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // APPEARANCE SECTION (Phase 5: Light default, Dark toggleable)
+          // APPEARANCE SECTION (Slice 3: Light / Dark / System, persisted
+          // by ThemeProvider in SharedPreferences under roambite_theme_mode.)
           _buildSectionHeader('APPEARANCE'),
           Container(
             decoration: BoxDecoration(
@@ -97,24 +106,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: theme.dividerColor),
             ),
-            child: SwitchListTile(
-              secondary: Icon(
-                themeProvider.isDarkMode ? Icons.dark_mode : Icons.light_mode,
-                color: theme.colorScheme.primary,
-              ),
-              title: const Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: Text(
-                themeProvider.isDarkMode ? 'Dark theme active' : 'Light theme active (Default)',
-                style: TextStyle(color: theme.hintColor, fontSize: 12),
-              ),
-              value: themeProvider.isDarkMode,
-              onChanged: (val) => themeProvider.toggleTheme(val),
-              activeThumbColor: theme.colorScheme.primary,
+            child: Column(
+              children: [
+                RadioListTile<ThemeMode>(
+                  title: const Text('Light', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: const Text('Always use the light theme', style: TextStyle(fontSize: 12)),
+                  secondary: const Icon(Icons.light_mode, color: Color(0xFFFF5722)),
+                  value: ThemeMode.light,
+                  groupValue: themeProvider.themeMode,
+                  activeColor: theme.colorScheme.primary,
+                  onChanged: (mode) {
+                    if (mode != null) themeProvider.setThemeMode(mode);
+                  },
+                ),
+                Divider(height: 1, color: theme.dividerColor),
+                RadioListTile<ThemeMode>(
+                  title: const Text('Dark', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: const Text('Always use the dark theme', style: TextStyle(fontSize: 12)),
+                  secondary: const Icon(Icons.dark_mode, color: Color(0xFFFF5722)),
+                  value: ThemeMode.dark,
+                  groupValue: themeProvider.themeMode,
+                  activeColor: theme.colorScheme.primary,
+                  onChanged: (mode) {
+                    if (mode != null) themeProvider.setThemeMode(mode);
+                  },
+                ),
+                Divider(height: 1, color: theme.dividerColor),
+                RadioListTile<ThemeMode>(
+                  title: const Text('System', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: const Text('Follow the device theme', style: TextStyle(fontSize: 12)),
+                  secondary: const Icon(Icons.settings_suggest, color: Color(0xFFFF5722)),
+                  value: ThemeMode.system,
+                  groupValue: themeProvider.themeMode,
+                  activeColor: theme.colorScheme.primary,
+                  onChanged: (mode) {
+                    if (mode != null) themeProvider.setThemeMode(mode);
+                  },
+                ),
+              ],
             ),
           ),
-
           const SizedBox(height: 20),
-
           // NOTIFICATIONS & GEOFENCING PREFERENCES (Phase 4)
           _buildSectionHeader('ARRIVAL ALERTS & NOTIFICATIONS'),
           Container(
@@ -155,7 +187,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Divider(height: 1, color: theme.dividerColor),
                 SwitchListTile(
                   secondary: const Icon(Icons.bedtime, color: Colors.indigoAccent),
-                  title: const Text('Quiet Hours (10 PM – 8 AM)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: const Text('Quiet Hours (10 PM - 8 AM)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: const Text('Suppress arrival pushes overnight', style: TextStyle(fontSize: 12)),
                   value: _quietHoursEnabled,
                   onChanged: (val) => setState(() => _quietHoursEnabled = val),
@@ -164,9 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
           // LOCATION SETTINGS
           _buildSectionHeader('LOCATION'),
           Container(
@@ -186,9 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: widget.onOpenLocationPicker,
             ),
           ),
-
           const SizedBox(height: 20),
-
           // SESSION & LOGOUT
           _buildSectionHeader('ACCOUNT'),
           Container(
@@ -224,13 +252,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ),
-
           const SizedBox(height: 28),
-
           // Version info
           Center(
             child: Text(
-              'RoamBite v1.1.0+2 • US Food Truck Network',
+              'RoamBite v1.1.0+2 - US Food Truck Network',
               style: TextStyle(color: theme.hintColor, fontSize: 11),
             ),
           ),
