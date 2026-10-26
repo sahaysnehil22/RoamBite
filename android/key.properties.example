@@ -1,0 +1,8 @@
+# Android Release Keystore Configuration Example
+# Copy this file to android/key.properties and replace with your real keystore values.
+# NEVER commit key.properties or .jks/.keystore files to version control!
+
+storePassword=your_keystore_password
+keyPassword=your_key_password
+keyAlias=roambite_release_key
+storeFile=/path/to/your/upload-keystore.jks

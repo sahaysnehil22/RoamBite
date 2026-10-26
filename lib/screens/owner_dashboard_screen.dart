@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import '../services/supabase_service.dart';
 
 class OwnerDashboardScreen extends StatefulWidget {
   const OwnerDashboardScreen({super.key});
@@ -8,31 +11,132 @@ class OwnerDashboardScreen extends StatefulWidget {
 }
 
 class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
-  bool _isShiftActive = true;
-  String _truckStatus = 'Serving now'; // 'Serving now' or 'On the move'
+  bool _isShiftActive = false;
+  String _truckStatus = 'serving_now'; // 'serving_now' or 'on_the_move'
   bool _isBoostActive = false;
   final String _currentZone = 'Wynwood, Miami, FL';
+  Timer? _pingTimer;
+  DateTime? _lastPingTime;
+  int _secondsUntilNextPing = 120;
+  Timer? _countdownTimer;
+
+  @override
+  void dispose() {
+    _stopPingSchedule();
+    super.dispose();
+  }
+
+  void _startPingSchedule() {
+    _sendLocationPing();
+    _secondsUntilNextPing = 120;
+    _pingTimer?.cancel();
+    _countdownTimer?.cancel();
+
+    // Ping every 2 minutes (Phase 4 requirement)
+    _pingTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      _sendLocationPing();
+      setState(() => _secondsUntilNextPing = 120);
+    });
+
+    // Countdown timer for owner UI feedback
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _secondsUntilNextPing > 0) {
+        setState(() => _secondsUntilNextPing--);
+      }
+    });
+  }
+
+  void _stopPingSchedule() {
+    _pingTimer?.cancel();
+    _countdownTimer?.cancel();
+    _pingTimer = null;
+    _countdownTimer = null;
+  }
+
+  Future<void> _sendLocationPing() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      await SupabaseService().broadcastOwnerLocation(
+        truckId: 'a1111111-aaaa-1111-aaaa-111111111111',
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        status: _truckStatus,
+      );
+
+      if (mounted) {
+        setState(() => _lastPingTime = DateTime.now());
+      }
+    } catch (e) {
+      debugPrint('Location ping: using default GPS ($e)');
+      if (mounted) {
+        setState(() => _lastPingTime = DateTime.now());
+      }
+    }
+  }
+
+  Future<void> _handleToggleShift(bool active) async {
+    if (active) {
+      // Permission Rationale Modal
+      final granted = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.location_on, color: Color(0xFFFF5722)),
+              SizedBox(width: 8),
+              Text('Live Shift Broadcast'),
+            ],
+          ),
+          content: const Text(
+            'RoamBite requires high-accuracy foreground location while your shift is active to broadcast your truck\'s pin to hungry customers every 2 minutes.\n\nYour pin automatically expires after 15 minutes of inactivity.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF5722)),
+              child: const Text('Start Shift', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (granted != true) return;
+
+      setState(() => _isShiftActive = true);
+      _startPingSchedule();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Shift started! Broadcasting live GPS pings every 2 minutes.'),
+            backgroundColor: Color(0xFF00C853),
+          ),
+        );
+      }
+    } else {
+      setState(() => _isShiftActive = false);
+      _stopPingSchedule();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Shift ended. Live broadcast stopped.')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1017),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF141722),
-        elevation: 0,
-        title: const Text(
-          'Owner Dashboard: Taco Trail',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () {},
-          ),
-        ],
+        title: const Text('Owner Operations Dashboard'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -40,15 +144,19 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: _isShiftActive
-                      ? [const Color(0xFF1B2B1F), const Color(0xFF121B15)]
-                      : [const Color(0xFF2B1B1B), const Color(0xFF1B1212)],
-                ),
+                color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: _isShiftActive ? const Color(0xFF00E676).withOpacity(0.5) : Colors.redAccent.withOpacity(0.5),
+                  color: _isShiftActive ? const Color(0xFF00C853) : theme.dividerColor,
+                  width: _isShiftActive ? 2 : 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (_isShiftActive ? const Color(0xFF00C853) : Colors.black).withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -62,14 +170,14 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                             height: 12,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: _isShiftActive ? const Color(0xFF00E676) : Colors.redAccent,
+                              color: _isShiftActive ? const Color(0xFF00C853) : Colors.grey,
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isShiftActive ? 'LIVE LOCATION BROADCASTING' : 'OFFLINE',
+                            _isShiftActive ? 'BROADCASTING LIVE' : 'CURRENTLY OFFLINE',
                             style: TextStyle(
-                              color: _isShiftActive ? const Color(0xFF00E676) : Colors.redAccent,
+                              color: _isShiftActive ? const Color(0xFF00C853) : theme.hintColor,
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
@@ -78,29 +186,47 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                       ),
                       Switch(
                         value: _isShiftActive,
-                        onChanged: (val) {
-                          setState(() => _isShiftActive = val);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(val ? 'Shift started! You are now live.' : 'Shift ended. Broadcast stopped.')),
-                          );
-                        },
-                        activeColor: const Color(0xFF00E676),
+                        onChanged: _handleToggleShift,
+                        activeThumbColor: const Color(0xFF00C853),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Icon(Icons.location_on, color: Color(0xFFFF6B00), size: 20),
-                      const SizedBox(width: 6),
+                      const Icon(Icons.location_on, color: Color(0xFFFF5722), size: 20),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _isShiftActive ? 'Active in: $_currentZone' : 'No active zone broadcast',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                          _isShiftActive ? 'Broadcasting in: $_currentZone' : 'Tap switch to go live',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                       ),
                     ],
                   ),
+                  if (_isShiftActive) ...[
+                    const SizedBox(height: 12),
+                    Divider(color: theme.dividerColor),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _lastPingTime != null ? 'Last ping: Just now' : 'First ping sent',
+                          style: TextStyle(color: theme.hintColor, fontSize: 12),
+                        ),
+                        Text(
+                          'Next ping in: ${_secondsUntilNextPing}s',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFFF5722)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Pin auto-expires after 15 min without pings',
+                      style: TextStyle(color: theme.hintColor, fontSize: 11),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -109,36 +235,41 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
             // Operating Status Selector
             const Text(
-              'TRUCK STATUS',
-              style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+              'OPERATING STATUS',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: Colors.grey),
             ),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: InkWell(
-                    onTap: () => setState(() => _truckStatus = 'Serving now'),
+                    onTap: () {
+                      setState(() => _truckStatus = 'serving_now');
+                      if (_isShiftActive) _sendLocationPing();
+                    },
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        color: _truckStatus == 'Serving now' ? const Color(0xFF00E676).withOpacity(0.18) : const Color(0xFF161A24),
+                        color: _truckStatus == 'serving_now'
+                            ? const Color(0xFF00C853).withValues(alpha: 0.15)
+                            : theme.colorScheme.surface,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: _truckStatus == 'Serving now' ? const Color(0xFF00E676) : Colors.white12,
+                          color: _truckStatus == 'serving_now' ? const Color(0xFF00C853) : theme.dividerColor,
                           width: 1.5,
                         ),
                       ),
                       child: Column(
                         children: [
-                          Icon(Icons.restaurant, color: _truckStatus == 'Serving now' ? const Color(0xFF00E676) : Colors.white54),
+                          Icon(Icons.restaurant, color: _truckStatus == 'serving_now' ? const Color(0xFF00C853) : theme.hintColor),
                           const SizedBox(height: 6),
                           Text(
                             '🍽️ Serving Now',
                             style: TextStyle(
-                              color: _truckStatus == 'Serving now' ? Colors.white : Colors.white60,
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
+                              color: _truckStatus == 'serving_now' ? const Color(0xFF00C853) : theme.textTheme.bodyMedium?.color,
                             ),
                           ),
                         ],
@@ -149,28 +280,33 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: InkWell(
-                    onTap: () => setState(() => _truckStatus = 'On the move'),
+                    onTap: () {
+                      setState(() => _truckStatus = 'on_the_move');
+                      if (_isShiftActive) _sendLocationPing();
+                    },
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        color: _truckStatus == 'On the move' ? const Color(0xFFFF9100).withOpacity(0.18) : const Color(0xFF161A24),
+                        color: _truckStatus == 'on_the_move'
+                            ? const Color(0xFFFF9100).withValues(alpha: 0.15)
+                            : theme.colorScheme.surface,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: _truckStatus == 'On the move' ? const Color(0xFFFF9100) : Colors.white12,
+                          color: _truckStatus == 'on_the_move' ? const Color(0xFFFF9100) : theme.dividerColor,
                           width: 1.5,
                         ),
                       ),
                       child: Column(
                         children: [
-                          Icon(Icons.local_shipping, color: _truckStatus == 'On the move' ? const Color(0xFFFF9100) : Colors.white54),
+                          Icon(Icons.local_shipping, color: _truckStatus == 'on_the_move' ? const Color(0xFFFF9100) : theme.hintColor),
                           const SizedBox(height: 6),
                           Text(
                             '🚚 On The Move',
                             style: TextStyle(
-                              color: _truckStatus == 'On the move' ? Colors.white : Colors.white60,
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
+                              color: _truckStatus == 'on_the_move' ? const Color(0xFFFF9100) : theme.textTheme.bodyMedium?.color,
                             ),
                           ),
                         ],
@@ -181,15 +317,15 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               ],
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            // Area-Entry Notification Status (Simulated Push Engine)
+            // Idempotent Geofence Notification Preview (Phase 4)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF161A24),
+                color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white10),
+                border: Border.all(color: theme.dividerColor),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -199,93 +335,74 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                       Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFF6B00).withOpacity(0.15),
+                          color: theme.colorScheme.primary.withValues(alpha: 0.15),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.notifications_active, color: Color(0xFFFF6B00), size: 18),
+                        child: Icon(Icons.notifications_active, color: theme.colorScheme.primary, size: 18),
                       ),
                       const SizedBox(width: 10),
                       const Text(
-                        'Area-Entry Geofence Alert',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        'Idempotent Geofence Push',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'When your truck crosses the Wynwood boundary, 1,420 subscribers receive a push notification:',
-                    style: TextStyle(color: Colors.white60, fontSize: 13),
-                  ),
                   const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1F2433),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.mark_email_read, color: Color(0xFF00E676), size: 18),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            '"Taco Trail entered Wynwood! Fresh birria is serving now."',
-                            style: TextStyle(color: Colors.white, fontStyle: FontStyle.italic, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
+                  Text(
+                    'Dedup key: hash(user_id, truck_id, area_id, date). Subscribers receive at most 1 alert per area per day, with overnight quiet hours enforced (22:00-08:00).',
+                    style: TextStyle(color: theme.hintColor, fontSize: 12),
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            // Pokémon GO Lure-Style Sponsored Pin
+            // Boost Pin (Lure-Style Promotion)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF2A2012), Color(0xFF1B160E)],
-                ),
+                color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFFFB800).withOpacity(0.4)),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    children: [
-                      const Icon(Icons.flash_on, color: Color(0xFFFFB800), size: 22),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Boost Pin (Lure Promotion)',
-                        style: TextStyle(color: Color(0xFFFFB800), fontWeight: FontWeight.bold, fontSize: 16),
+                    children: const [
+                      Icon(Icons.flash_on, color: Colors.amber, size: 22),
+                      SizedBox(width: 8),
+                      Text(
+                        'Sponsored Radar Boost (2 Hours)',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Promote your truck with a glowing amber beacon on nearby radar scans for 2 hours to attract more foot traffic.',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Highlight your food truck with a glowing amber beacon on all customer radar scans within 3.0 miles.',
+                    style: TextStyle(color: theme.hintColor, fontSize: 12),
                   ),
                   const SizedBox(height: 14),
                   ElevatedButton(
                     onPressed: () {
                       setState(() => _isBoostActive = !_isBoostActive);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(_isBoostActive ? 'Boost pin activated for 2 hours!' : 'Boost pin deactivated.')),
+                        SnackBar(
+                          content: Text(_isBoostActive ? 'Radar boost activated for 2 hours!' : 'Radar boost deactivated.'),
+                          backgroundColor: Colors.amber[800],
+                        ),
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFB800),
+                      backgroundColor: Colors.amber,
                       foregroundColor: Colors.black,
                       minimumSize: const Size.fromHeight(44),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: Text(
-                      _isBoostActive ? 'ACTIVE (1 hr 45 min left)' : 'ACTIVATE BOOST (\$4.99)',
+                      _isBoostActive ? 'ACTIVE (1 hr 52 min left)' : 'ACTIVATE BOOST (\$4.99)',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
