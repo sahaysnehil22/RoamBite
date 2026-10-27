@@ -1,40 +1,52 @@
-import 'profile_screen.dart';
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/food_truck.dart';
+import '../providers/auth_provider.dart';
+import '../services/demo_trucks.dart';
 import '../services/location_service.dart';
-import '../services/supabase_service.dart'; import '../services/demo_trucks.dart'; import '../widgets/service_area_gate.dart';
+import '../services/supabase_service.dart';
+import '../widgets/service_area_gate.dart';
+import 'profile_screen.dart';
 import 'truck_detail_screen.dart';
 
-// Slice 2: Zomato-style foodie dashboard.
-// The data flow is unchanged: trucks come from SupabaseService.fetchLiveTrucks.
-// Promotions reuse the trucks' existing isSponsored flag; when no truck is
-// sponsored, a single generic RoamBite card is shown instead of invented offers.
-// "Near me" means within 2 miles and "Top rated" means a rating of 4.5 or more.
+// Zomato-style foodie dashboard with full-bleed animated upper promotion section,
+// Near & Fast filter & truck card badges, circular dish categories, and Miami Demo Hub banner.
 class HomeDashboardScreen extends StatefulWidget {
   final UserLocation currentLocation;
   final VoidCallback onOpenLocationPicker;
-  final VoidCallback onSwitchToRadar; final VoidCallback? onBrowseMiamiDemo;
+  final VoidCallback onSwitchToRadar;
+  final VoidCallback? onBrowseMiamiDemo;
 
   const HomeDashboardScreen({
     super.key,
     required this.currentLocation,
     required this.onOpenLocationPicker,
-    required this.onSwitchToRadar, this.onBrowseMiamiDemo,
+    required this.onSwitchToRadar,
+    this.onBrowseMiamiDemo,
   });
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
 }
 
-class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
+class _HomeDashboardScreenState extends State<HomeDashboardScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final PageController _promoController = PageController();
+  late AnimationController _soothingAnimController;
+  Timer? _autoSlideTimer;
+
   List<FoodTruck> _trucks = [];
-  bool _isLoading = true; bool _isDemoFallback = false;
+  bool _isLoading = true;
+  bool _isDemoFallback = false;
   String _selectedCuisine = 'All';
+  bool _nearAndFastOnly = false;
   bool _openNowOnly = false;
   bool _nearMeOnly = false;
   bool _topRatedOnly = false;
+  bool _vegOnly = false;
   int _promoIndex = 0;
 
   static const double _nearMeMiles = 2.0;
@@ -43,6 +55,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _soothingAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 4200),
+    )..repeat(reverse: true);
+
+    _autoSlideTimer = Timer.periodic(const Duration(milliseconds: 3800), (_) {
+      if (!mounted || !_promoController.hasClients) return;
+      final total = DemoTrucks.heroPromotions.length;
+      if (total <= 1) return;
+      final next = (_promoIndex + 1) % total;
+      _promoController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 650),
+        curve: Curves.easeInOutCubic,
+      );
+    });
+
     _loadTrucks();
   }
 
@@ -50,21 +79,55 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   void didUpdateWidget(covariant HomeDashboardScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentLocation.latitude != widget.currentLocation.latitude ||
-        oldWidget.currentLocation.longitude != widget.currentLocation.longitude) {
+        oldWidget.currentLocation.longitude !=
+            widget.currentLocation.longitude) {
       _loadTrucks();
     }
   }
 
   Future<void> _loadTrucks() async {
     if (!mounted) return;
-    if (!LocationService.isInServiceArea(widget.currentLocation)) { if (mounted) { setState(() { _trucks = []; _isLoading = false; _isDemoFallback = false; }); } return; } if (!SupabaseConfig.isConfigured) { if (mounted) { setState(() { _trucks = DemoTrucks.forLocation(userLat: widget.currentLocation.latitude, userLng: widget.currentLocation.longitude); _isLoading = false; _isDemoFallback = true; }); } return; } setState(() => _isLoading = true);
+    // US-only service-area gate FIRST, radius filter only AFTER gate passes
+    if (!LocationService.isInServiceArea(widget.currentLocation)) {
+      if (mounted) {
+        setState(() {
+          _trucks = [];
+          _isLoading = false;
+          _isDemoFallback = false;
+        });
+      }
+      return;
+    }
+    if (!SupabaseConfig.isConfigured) {
+      if (mounted) {
+        setState(() {
+          _trucks = DemoTrucks.forLocation(
+            userLat: widget.currentLocation.latitude,
+            userLng: widget.currentLocation.longitude,
+          );
+          _isLoading = false;
+          _isDemoFallback = true;
+        });
+      }
+      return;
+    }
+    setState(() => _isLoading = true);
     final results = await SupabaseService().fetchLiveTrucks(
       userLat: widget.currentLocation.latitude,
       userLng: widget.currentLocation.longitude,
     );
     if (mounted) {
       setState(() {
-        _trucks = results.isEmpty ? DemoTrucks.forLocation(userLat: widget.currentLocation.latitude, userLng: widget.currentLocation.longitude) : results.where((t) => t.distanceInMiles <= LocationService.kServiceRadiusMiles).toList(); _isDemoFallback = results.isEmpty;
+        _trucks = results.isEmpty
+            ? DemoTrucks.forLocation(
+                userLat: widget.currentLocation.latitude,
+                userLng: widget.currentLocation.longitude,
+              )
+            : results
+                .where(
+                    (t) => t.distanceInMiles <= LocationService.kServiceRadiusMiles)
+                .toList();
+        _isDemoFallback = results.isEmpty;
         _isLoading = false;
       });
     }
@@ -72,6 +135,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   @override
   void dispose() {
+    _autoSlideTimer?.cancel();
+    _soothingAnimController.dispose();
     _searchController.dispose();
     _promoController.dispose();
     super.dispose();
@@ -101,19 +166,48 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     }
   }
 
-  void _openTruckDetail(FoodTruck truck) {
-    Navigator.of(context).push(
+  Future<void> _openTruckDetail(FoodTruck truck) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => TruckDetailScreen(truck: truck)),
     );
+    if (mounted) {
+      _loadTrucks();
+    }
+  }
+
+  void _openPromoTruck(PromoBanner promo) {
+    final match = _trucks.where((t) => t.id == promo.truckId).toList();
+    if (match.isNotEmpty) {
+      _openTruckDetail(match.first);
+    } else if (_trucks.isNotEmpty) {
+      _openTruckDetail(_trucks.first);
+    }
   }
 
   @override
-  Widget build(BuildContext context) { if (!LocationService.isInServiceArea(widget.currentLocation)) { return Scaffold(body: SafeArea(child: ServiceAreaGate(location: widget.currentLocation, onBrowseMiamiDemo: widget.onBrowseMiamiDemo ?? () {}, onChangeLocation: widget.onOpenLocationPicker))); }
+  Widget build(BuildContext context) {
+    if (!LocationService.isInServiceArea(widget.currentLocation)) {
+      return Scaffold(
+        body: SafeArea(
+          child: ServiceAreaGate(
+            location: widget.currentLocation,
+            onBrowseMiamiDemo: widget.onBrowseMiamiDemo ?? () {},
+            onChangeLocation: widget.onOpenLocationPicker,
+          ),
+        ),
+      );
+    }
+
     final theme = Theme.of(context);
+    final auth = context.watch<AuthProvider>();
     final query = _searchController.text.toLowerCase();
 
     final filtered = _trucks.where((t) {
-      if (_selectedCuisine != 'All' && !t.cuisine.toLowerCase().contains(_selectedCuisine.toLowerCase())) {
+      if (_selectedCuisine != 'All' &&
+          !t.cuisine.toLowerCase().contains(_selectedCuisine.toLowerCase())) {
+        return false;
+      }
+      if (_nearAndFastOnly && !t.isNearAndFast) {
         return false;
       }
       if (_openNowOnly && !_isOpen(t)) {
@@ -125,18 +219,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       if (_topRatedOnly && t.rating < _topRatedThreshold) {
         return false;
       }
+      if (_vegOnly && !t.menu.any((m) => m.isVegetarian)) {
+        return false;
+      }
       if (query.isNotEmpty) {
         final matchesName = t.name.toLowerCase().contains(query);
         final matchesCuisine = t.cuisine.toLowerCase().contains(query);
-        final matchesDish = t.menu.any((m) => m.name.toLowerCase().contains(query));
+        final matchesDish =
+            t.menu.any((m) => m.name.toLowerCase().contains(query));
         return matchesName || matchesCuisine || matchesDish;
       }
       return true;
     }).toList();
 
-    final liveTrucks = filtered.where((t) => t.status == TruckStatus.servingNow).toList();
-    final recommended = [...filtered]..sort((a, b) => b.rating.compareTo(a.rating));
-    final sponsored = _trucks.where((t) => t.isSponsored).toList();
+    final liveTrucks =
+        filtered.where((t) => t.status == TruckStatus.servingNow).toList();
+    final recommended = [...filtered]
+      ..sort((a, b) => b.rating.compareTo(a.rating));
 
     return Scaffold(
       body: SafeArea(
@@ -145,122 +244,121 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
-              // Top location bar: current location name with a Change affordance.
+              // 1. Zomato-Style Full-Bleed Animated Upper Section
+              SliverToBoxAdapter(
+                child: _buildZomatoUpperHeroSection(theme, auth, query),
+              ),
+
+              // 2. Miami Demo Hub Banner (always shown when demo hub is active)
+              if (_isDemoFallback)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF5722),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              color: Colors.white, size: 18),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'MIAMI DEMO HUB • Showing 4 seed food trucks in Wynwood, Miami.',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // 3. Circular Plated Category Strip (Zomato Style)
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: _buildCircularCategoryStrip(theme),
+                ),
+              ),
+
+              // 4. Filter Pills Row (Featuring "Near & Fast", "Open now", "Near me", "Top rated")
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 46,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.asset(
-                          'assets/images/roambite_logo_white.png',
-                          width: 36,
-                          height: 36,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.local_shipping, size: 28),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: InkWell(
-                          onTap: widget.onOpenLocationPicker,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.location_on, size: 14, color: theme.colorScheme.primary),
-                                  const SizedBox(width: 2),
-                                  Flexible(
-                                    child: Text(
-                                      widget.currentLocation.label,
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const Icon(Icons.keyboard_arrow_down, size: 16),
-                                ],
-                              ),
-                              Text(
-                                widget.currentLocation.formattedAddress,
-                                style: TextStyle(color: theme.hintColor, fontSize: 11),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          avatar: const Icon(
+                            Icons.bolt,
+                            color: Color(0xFF00C853),
+                            size: 18,
                           ),
+                          label: const Text(
+                            'Near & Fast',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          selected: _nearAndFastOnly,
+                          selectedColor:
+                              const Color(0xFF00C853).withValues(alpha: 0.16),
+                          onSelected: (selected) =>
+                              setState(() => _nearAndFastOnly = selected),
                         ),
                       ),
-                      TextButton(
-                        onPressed: widget.onOpenLocationPicker,
-                        child: const Text('Change'),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: const Text('Open now'),
+                          selected: _openNowOnly,
+                          onSelected: (selected) =>
+                              setState(() => _openNowOnly = selected),
+                        ),
                       ),
-                      IconButton(
-                        onPressed: widget.onOpenLocationPicker,
-                        icon: const Icon(Icons.my_location, size: 20),
-                        tooltip: 'Use GPS Location',
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: const Text('Near me'),
+                          selected: _nearMeOnly,
+                          onSelected: (selected) =>
+                              setState(() => _nearMeOnly = selected),
+                        ),
                       ),
-                      IconButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen())), icon: const Icon(Icons.account_circle, size: 28), tooltip: 'Profile', color: theme.colorScheme.primary),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: const Text('Top rated 4.5+'),
+                          selected: _topRatedOnly,
+                          onSelected: (selected) =>
+                              setState(() => _topRatedOnly = selected),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
 
-              // Search bar: filters the shown truck list by name (and cuisine/dish).
+              // 5. Proximity Radar Callout Banner
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: 'Search tacos, burgers, coffee...',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: query.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.clear),
-                              tooltip: 'Clear search',
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() {});
-                              },
-                            ),
-                      filled: true,
-                      fillColor: theme.colorScheme.surface,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: theme.dividerColor),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: theme.dividerColor),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                ),
-              ),
-
-              // Sponsored promo banner carousel at the top.
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: _buildPromoCarousel(theme, sponsored),
-                ),
-              ),
-
-              // Radar Banner Callout
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: InkWell(
                     onTap: widget.onSwitchToRadar,
                     borderRadius: BorderRadius.circular(18),
                     child: Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
@@ -269,13 +367,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                           ],
                         ),
                         borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: theme.colorScheme.primary.withValues(alpha: 0.25),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
                       ),
                       child: Row(
                         children: [
@@ -285,9 +376,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                               color: Colors.white.withValues(alpha: 0.2),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.radar, color: Colors.white, size: 24),
+                            child: const Icon(Icons.radar,
+                                color: Colors.white, size: 22),
                           ),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -297,21 +389,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 16,
+                                    fontSize: 15,
                                   ),
                                 ),
-                                const SizedBox(height: 2),
                                 Text(
-                                  'Discover trucks pulsing live around you right now',
+                                  'Tap truck profiles pulsing live around you right now',
                                   style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.9),
+                                    color: Colors.white.withValues(alpha: 0.92),
                                     fontSize: 12,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          const Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
+                          const Icon(Icons.arrow_forward_ios,
+                              color: Colors.white70, size: 15),
                         ],
                       ),
                     ),
@@ -319,68 +411,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ),
 
-              // Quick Cuisine Filter Pills
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 44,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: ['All', 'Tacos', 'Burgers', 'Coffee', 'Arepas', 'BBQ'].map((cat) {
-                      final isSelected = _selectedCuisine == cat;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(cat),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            if (selected) setState(() => _selectedCuisine = cat);
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-              // Working filter chips: these actually filter the truck list above.
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 44,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: const Text('Open now'),
-                          selected: _openNowOnly,
-                          onSelected: (selected) => setState(() => _openNowOnly = selected),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: const Text('Near me'),
-                          selected: _nearMeOnly,
-                          onSelected: (selected) => setState(() => _nearMeOnly = selected),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: const Text('Top rated'),
-                          selected: _topRatedOnly,
-                          onSelected: (selected) => setState(() => _topRatedOnly = selected),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_isDemoFallback) SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(12)), child: const Text('Showing Miami demo trucks because live data is unavailable right now.', style: TextStyle(color: Colors.white, fontSize: 12))))), const SliverToBoxAdapter(child: SizedBox(height: 16)),
-              // Live & Serving Right Now Section
+              // 6. Live & Serving Right Now Section
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -397,7 +430,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       const SizedBox(width: 8),
                       const Text(
                         'SERVING RIGHT NOW',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.6),
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.6),
                       ),
                       const Spacer(),
                       Text(
@@ -409,17 +445,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 10)),
-              // Horizontal Live Trucks Carousel
               SliverToBoxAdapter(
                 child: SizedBox(
-                  height: 200,
+                  height: 215,
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : liveTrucks.isEmpty
-                          ? _buildEmptySection('No food trucks currently live in this radius.')
+                          ? _buildEmptySection(
+                              'No food trucks currently live in this radius.')
                           : ListView.builder(
                               scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
                               itemCount: liveTrucks.length,
                               itemBuilder: (context, index) {
                                 final truck = liveTrucks[index];
@@ -428,29 +465,32 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                             ),
                 ),
               ),
+
               const SliverToBoxAdapter(child: SizedBox(height: 20)),
-              // Recommended Truck Section
-              SliverToBoxAdapter(
+
+              // 7. Recommended For You Section
+              const SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.star, color: Colors.amber, size: 18),
-                      SizedBox(width: 6),
-                      Text(
-                        'RECOMMENDED FOR YOU',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.6),
-                      ),
-                    ],
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    'RECOMMENDED FOR YOU',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.1,
+                      color: Colors.grey,
+                    ),
                   ),
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 10)),
-              // Recommended List
               if (_isLoading)
-                const SliverToBoxAdapter(child: Center(child: CircularProgressIndicator()))
+                const SliverToBoxAdapter(
+                    child: Center(child: CircularProgressIndicator()))
               else if (recommended.isEmpty)
-                SliverToBoxAdapter(child: _buildEmptySection('No trucks found matching query.'))
+                SliverToBoxAdapter(
+                    child:
+                        _buildEmptySection('No trucks found matching query.'))
               else
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -472,165 +512,395 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildPromoCarousel(ThemeData theme, List<FoodTruck> sponsored) {
-    if (_isLoading) {
-      return const SizedBox(
-        height: 160,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (sponsored.isEmpty) {
-      return _buildGenericPromoCard(theme);
-    }
-    final promoIndex = sponsored.isEmpty ? 0 : _promoIndex % sponsored.length;
-    return Column(
-      children: [
-        SizedBox(
-          height: 160,
-          child: PageView.builder(
-            controller: _promoController,
-            onPageChanged: (index) => setState(() => _promoIndex = index),
-            itemCount: sponsored.length,
-            itemBuilder: (context, index) {
-              final truck = sponsored[index];
-              return _buildSponsoredPromoCard(truck, theme);
-            },
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(sponsored.length, (index) {
-            final isActive = index == promoIndex;
-            return Container(
-              width: isActive ? 20 : 8,
-              height: 8,
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              decoration: BoxDecoration(
-                color: isActive ? theme.colorScheme.primary : theme.dividerColor,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            );
-          }),
-        ),
-      ],
-    );
-  }
+  /// Full-bleed Zomato-style upper section covering location bar, profile "S" button,
+  /// search bar, VEG MODE switch, and auto-advancing animated promotions.
+  Widget _buildZomatoUpperHeroSection(
+      ThemeData theme, AuthProvider auth, String query) {
+    final promos = DemoTrucks.heroPromotions;
+    final currentPromo = promos[_promoIndex % promos.length];
+    final primaryBg = Color(currentPromo.primaryColorHex);
+    final secondaryBg = Color(currentPromo.secondaryColorHex);
+    final userInitial = (auth.displayName ?? 'Snehil').trim().isNotEmpty
+        ? (auth.displayName ?? 'Snehil').trim()[0].toUpperCase()
+        : 'S';
 
-  Widget _buildSponsoredPromoCard(FoodTruck truck, ThemeData theme) {
-    return GestureDetector(
-      onTap: () => _openTruckDetail(truck),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: theme.colorScheme.primary,
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Image.network(
-                truck.heroImageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  color: theme.colorScheme.primary,
-                  child: const Icon(Icons.local_shipping, color: Colors.white, size: 48),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.1),
-                      Colors.black.withValues(alpha: 0.65),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 14,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'SPONSORED',
-                      style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    truck.name,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    '${truck.cuisine} \u2022 ${truck.distanceInMiles} mi away',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGenericPromoCard(ThemeData theme) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
-      height: 160,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 550),
+      curve: Curves.easeInOut,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primary,
-            const Color(0xFFFF8A65),
-          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [primaryBg, secondaryBg],
         ),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(26)),
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
+          // Soothing repeating starburst background animation
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _soothingAnimController,
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _HeroStarburstPainter(
+                    progress: _soothingAnimController.value,
+                  ),
+                );
+              },
             ),
-            child: const Icon(Icons.local_shipping, color: Colors.white, size: 28),
           ),
-          const SizedBox(width: 14),
-          const Expanded(
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Fresh trucks near you',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                // Row 1: Location Header + GOLD Badge + Circular "S" Profile Button
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: widget.onOpenLocationPicker,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on,
+                                    size: 18, color: Colors.white),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    widget.currentLocation.label,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 16,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const Icon(Icons.keyboard_arrow_down,
+                                    color: Colors.white, size: 18),
+                              ],
+                            ),
+                            Text(
+                              widget.currentLocation.formattedAddress,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.85),
+                                fontSize: 11,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFFFF3C4), Color(0xFFFFD54F)],
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Text(
+                        'GOLD',
+                        style: TextStyle(
+                          color: Color(0xFF5D4037),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    InkWell(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const ProfileScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: CircleAvatar(
+                        radius: 18,
+                        backgroundColor: const Color(0xFFD2E3FC),
+                        backgroundImage: (auth.avatarUrl != null &&
+                                auth.avatarUrl!.isNotEmpty)
+                            ? NetworkImage(auth.avatarUrl!)
+                            : null,
+                        child: (auth.avatarUrl == null ||
+                                auth.avatarUrl!.isEmpty)
+                            ? Text(
+                                userInitial,
+                                style: const TextStyle(
+                                  color: Color(0xFF174EA6),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(height: 4),
-                Text(
-                  'Find live food trucks, menus and opening times in one place.',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
+
+                const SizedBox(height: 12),
+
+                // Row 2: White Search Bar + VEG MODE Toggle
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: TextField(
+                          controller: _searchController,
+                          onChanged: (_) => setState(() {}),
+                          style: const TextStyle(
+                              color: Colors.black87, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Search "quesabirria" or "smash burger"',
+                            hintStyle: const TextStyle(
+                                color: Colors.black45, fontSize: 13),
+                            prefixIcon: const Icon(Icons.search,
+                                color: Color(0xFFE23744)),
+                            suffixIcon: query.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.clear,
+                                        color: Colors.black54, size: 18),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
+                                  ),
+                            border: InputBorder.none,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'VEG\nMODE',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 8.5,
+                            height: 1.0,
+                          ),
+                        ),
+                        SizedBox(
+                          height: 28,
+                          child: Switch(
+                            value: _vegOnly,
+                            activeThumbColor: const Color(0xFF00C853),
+                            onChanged: (val) => setState(() => _vegOnly = val),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // Row 3: Auto-Advancing Animated Promotions Carousel
+                SizedBox(
+                  height: 162,
+                  child: PageView.builder(
+                    controller: _promoController,
+                    onPageChanged: (idx) => setState(() => _promoIndex = idx),
+                    itemCount: promos.length,
+                    itemBuilder: (context, idx) {
+                      final promo = promos[idx];
+                      final accentColor = Color(promo.accentColorHex);
+                      return GestureDetector(
+                        onTap: () => _openPromoTruck(promo),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 6,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.28),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      promo.badgeText,
+                                      style: TextStyle(
+                                        color: accentColor,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 9.5,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    promo.headlineTop,
+                                    style: TextStyle(
+                                      color: accentColor,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 21,
+                                      fontStyle: FontStyle.italic,
+                                      height: 1.05,
+                                    ),
+                                  ),
+                                  Text(
+                                    promo.headlineMain,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 23,
+                                      fontStyle: FontStyle.italic,
+                                      height: 1.05,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    promo.subheadline,
+                                    style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.9),
+                                      fontSize: 11,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF141416),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          promo.ctaText,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(
+                                          Icons.chevron_right,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              flex: 4,
+                              child: AnimatedBuilder(
+                                animation: _soothingAnimController,
+                                builder: (context, child) {
+                                  final dy = math.sin(
+                                          _soothingAnimController.value *
+                                              math.pi) *
+                                      6.0;
+                                  final scale = 0.96 +
+                                      (0.06 * _soothingAnimController.value);
+                                  return Transform.translate(
+                                    offset: Offset(0, -dy),
+                                    child: Transform.scale(
+                                      scale: scale,
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                child: Center(
+                                  child: Container(
+                                    width: 118,
+                                    height: 118,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: accentColor,
+                                        width: 3,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withValues(alpha: 0.3),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipOval(
+                                      child: Image.network(
+                                        promo.imageUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          color: Colors.white24,
+                                          child: const Icon(
+                                            Icons.restaurant,
+                                            color: Colors.white,
+                                            size: 40,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                // Dots Indicator
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(promos.length, (idx) {
+                    final active = idx == (_promoIndex % promos.length);
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: active ? 18 : 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: active ? Colors.white : Colors.white38,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    );
+                  }),
                 ),
               ],
             ),
@@ -640,11 +910,114 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
+  Widget _buildCircularCategoryStrip(ThemeData theme) {
+    final categories = [
+      (
+        label: 'All',
+        query: 'All',
+        img:
+            'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=300&q=80'
+      ),
+      (
+        label: 'Tacos',
+        query: 'Tacos',
+        img:
+            'https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=300&q=80'
+      ),
+      (
+        label: 'Burgers',
+        query: 'Burgers',
+        img:
+            'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=300&q=80'
+      ),
+      (
+        label: 'Coffee',
+        query: 'Coffee',
+        img:
+            'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=300&q=80'
+      ),
+      (
+        label: 'Arepas',
+        query: 'Venezuelan',
+        img:
+            'https://images.unsplash.com/photo-1613514785940-daed07799d9b?auto=format&fit=crop&w=300&q=80'
+      ),
+    ];
+
+    return SizedBox(
+      height: 92,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: categories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 18),
+        itemBuilder: (context, idx) {
+          final item = categories[idx];
+          final selected = _selectedCuisine == item.query;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedCuisine = item.query),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: selected
+                          ? theme.colorScheme.primary
+                          : Colors.transparent,
+                      width: 2.5,
+                    ),
+                  ),
+                  child: ClipOval(
+                    child: Image.network(
+                      item.img,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => CircleAvatar(
+                        backgroundColor: Colors.orange.shade50,
+                        child: Icon(Icons.restaurant,
+                            color: theme.colorScheme.primary),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  item.label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                    color: selected
+                        ? theme.colorScheme.primary
+                        : theme.textTheme.bodyMedium?.color,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Container(
+                  width: 26,
+                  height: 2.5,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? theme.colorScheme.primary
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildLiveTruckCard(FoodTruck truck, ThemeData theme) {
     return GestureDetector(
       onTap: () => _openTruckDetail(truck),
       child: Container(
-        width: 240,
+        width: 245,
         margin: const EdgeInsets.only(right: 14),
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
@@ -659,11 +1032,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               children: [
                 Image.network(
                   truck.heroImageUrl,
-                  height: 110,
+                  height: 112,
                   width: double.infinity,
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => Container(
-                    height: 110,
+                    height: 112,
                     color: Colors.grey[300],
                     child: const Icon(Icons.local_shipping),
                   ),
@@ -672,14 +1045,43 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   top: 8,
                   left: 8,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFF00C853),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
                       'LIVE',
-                      style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E8E3E),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.star, color: Colors.white, size: 11),
+                        const SizedBox(width: 2),
+                        Text(
+                          '${truck.rating}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -687,14 +1089,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   bottom: 8,
                   right: 8,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.black87,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       '${truck.distanceInMiles} mi',
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -707,30 +1113,35 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 children: [
                   Text(
                     truck.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.star, color: Colors.amber, size: 14),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${truck.rating}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          truck.cuisine,
-                          style: TextStyle(color: theme.hintColor, fontSize: 11),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                  const SizedBox(height: 3),
+                  if (truck.isNearAndFast)
+                    Row(
+                      children: [
+                        const Icon(Icons.bolt,
+                            color: Color(0xFF00C853), size: 15),
+                        const SizedBox(width: 2),
+                        Text(
+                          'Near & Fast • ${truck.prepTimeWalkMins}',
+                          style: const TextStyle(
+                            color: Color(0xFF00C853),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    )
+                  else
+                    Text(
+                      '${truck.cuisine} • ${truck.prepTimeWalkMins}',
+                      style: TextStyle(color: theme.hintColor, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ),
             ),
@@ -759,13 +1170,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: Image.network(
-                  truck.heroImageUrl,
-                  width: 72,
-                  height: 72,
+                  truck.effectiveProfileImage,
+                  width: 82,
+                  height: 82,
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => Container(
-                    width: 72,
-                    height: 72,
+                    width: 82,
+                    height: 82,
                     color: Colors.grey[300],
                     child: const Icon(Icons.local_shipping),
                   ),
@@ -781,14 +1192,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         Expanded(
                           child: Text(
                             truck.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
                             color: const Color(0xFF1E8E3E),
                             borderRadius: BorderRadius.circular(6),
@@ -796,24 +1209,46 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.star, color: Colors.white, size: 12),
+                              const Icon(Icons.star,
+                                  color: Colors.white, size: 12),
                               const SizedBox(width: 2),
                               Text(
                                 '${truck.rating}',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${truck.cuisine} \u2022 ${truck.distanceInMiles} mi away \u2022 ${truck.priceRange}',
-                      style: TextStyle(color: theme.hintColor, fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    const SizedBox(height: 3),
+                    if (truck.isNearAndFast)
+                      Row(
+                        children: [
+                          const Icon(Icons.bolt,
+                              color: Color(0xFF00C853), size: 15),
+                          const SizedBox(width: 2),
+                          Text(
+                            'Near & Fast • ${truck.prepTimeWalkMins} • ${truck.distanceInMiles} mi',
+                            style: const TextStyle(
+                              color: Color(0xFF00C853),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        '${truck.cuisine} • ${truck.distanceInMiles} mi away • ${truck.priceRange}',
+                        style: TextStyle(color: theme.hintColor, fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     if (truck.tagline.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
@@ -829,8 +1264,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       runSpacing: 4,
                       children: [
                         _buildStatusBadge(truck),
-                        _buildTagChip(truck.cuisine),
-                        _buildTagChip(truck.priceRange),
+                        _buildTagChip('${truck.menu.length} Dishes'),
+                        _buildTagChip('${truck.videoReviews.length} Reviews'),
                         if (truck.isSponsored) _buildTagChip('Sponsored'),
                       ],
                     ),
@@ -853,7 +1288,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       ),
       child: Text(
         _statusLabel(truck),
-        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+            color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -873,8 +1309,48 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(message, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text(message,
+            style: const TextStyle(color: Colors.grey, fontSize: 12)),
       ),
     );
   }
+}
+
+class _HeroStarburstPainter extends CustomPainter {
+  final double progress;
+
+  _HeroStarburstPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width * 0.72, size.height * 0.62);
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.06)
+      ..style = PaintingStyle.fill;
+
+    const rayCount = 10;
+    final baseAngle = progress * math.pi * 0.25;
+    final radius = size.width * 0.85;
+
+    for (var i = 0; i < rayCount; i++) {
+      final a1 = baseAngle + (i * 2 * math.pi / rayCount);
+      final a2 = a1 + (math.pi / (rayCount * 1.8));
+      final path = Path()
+        ..moveTo(center.dx, center.dy)
+        ..lineTo(
+          center.dx + radius * math.cos(a1),
+          center.dy + radius * math.sin(a1),
+        )
+        ..lineTo(
+          center.dx + radius * math.cos(a2),
+          center.dy + radius * math.sin(a2),
+        )
+        ..close();
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeroStarburstPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }

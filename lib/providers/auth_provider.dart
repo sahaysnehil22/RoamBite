@@ -15,6 +15,11 @@ class AuthProvider extends ChangeNotifier {
   String? _phoneNumber;
   String? _email;
   String? _displayName;
+  String? _dateOfBirth;
+  String? _anniversary;
+  String? _gender;
+  String? _avatarUrl;
+  bool _vegMode = false;
   UserRole? _pendingGoogleRole;
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<Uri>? _linkSubscription;
@@ -28,6 +33,11 @@ class AuthProvider extends ChangeNotifier {
   String? get phoneNumber => _phoneNumber;
   String? get email => _email;
   String? get displayName => _displayName;
+  String? get dateOfBirth => _dateOfBirth;
+  String? get anniversary => _anniversary;
+  String? get gender => _gender;
+  String? get avatarUrl => _avatarUrl;
+  bool get vegMode => _vegMode;
 
   AuthProvider() {
     _listenToAuthChanges();
@@ -133,8 +143,8 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _applySupabaseUser(User user) async {
     _isSignedIn = true;
     _userId = user.id;
-    _phoneNumber = user.phone;
-    _email = user.email;
+    _phoneNumber = user.phone ?? _phoneNumber;
+    _email = user.email ?? _email;
     var role = _role;
     final serverRole = await SupabaseService().getUserRole(user.id);
     if (serverRole != null) {
@@ -177,7 +187,14 @@ class AuthProvider extends ChangeNotifier {
       final savedRoleStr = prefs.getString('roambite_user_role') ?? 'foodie';
       _userId = prefs.getString('roambite_user_id') ?? 'local_user';
       _displayName =
-          prefs.getString('roambite_display_name') ?? 'RoamBite Member';
+          prefs.getString('roambite_display_name') ?? 'Snehil Sahay';
+      _phoneNumber = prefs.getString('roambite_phone_number') ?? '7543917249';
+      _email = prefs.getString('roambite_email') ?? 'snehil.sahay@roambite.com';
+      _dateOfBirth = prefs.getString('roambite_dob') ?? '';
+      _anniversary = prefs.getString('roambite_anniversary') ?? '';
+      _gender = prefs.getString('roambite_gender') ?? 'Male';
+      _avatarUrl = prefs.getString('roambite_avatar_url');
+      _vegMode = prefs.getBool('roambite_veg_mode') ?? false;
 
       _isSignedIn = savedSignedIn;
       _role =
@@ -189,8 +206,8 @@ class AuthProvider extends ChangeNotifier {
         final current = supaClient.auth.currentUser!;
         _isSignedIn = true;
         _userId = current.id;
-        _phoneNumber = current.phone;
-        _email = current.email;
+        _phoneNumber = current.phone ?? _phoneNumber;
+        _email = current.email ?? _email;
         final serverRole = await SupabaseService().getUserRole(current.id);
         if (serverRole != null) {
           _role = serverRole == 'truck_owner'
@@ -206,6 +223,69 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Update user profile fields (Name, Mobile, Email, DOB, Anniversary, Gender, Avatar)
+  Future<void> updateUserProfile({
+    required String displayName,
+    String? phoneNumber,
+    String? email,
+    String? dateOfBirth,
+    String? anniversary,
+    String? gender,
+    String? avatarUrl,
+  }) async {
+    _displayName = displayName.trim().isNotEmpty
+        ? displayName.trim()
+        : (_displayName ?? 'RoamBite Member');
+    if (phoneNumber != null) _phoneNumber = phoneNumber.trim();
+    if (email != null) _email = email.trim();
+    if (dateOfBirth != null) _dateOfBirth = dateOfBirth.trim();
+    if (anniversary != null) _anniversary = anniversary.trim();
+    if (gender != null) _gender = gender.trim();
+    if (avatarUrl != null) _avatarUrl = avatarUrl.trim();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('roambite_display_name', _displayName!);
+    if (_phoneNumber != null) {
+      await prefs.setString('roambite_phone_number', _phoneNumber!);
+    }
+    if (_email != null) {
+      await prefs.setString('roambite_email', _email!);
+    }
+    if (_dateOfBirth != null) {
+      await prefs.setString('roambite_dob', _dateOfBirth!);
+    }
+    if (_anniversary != null) {
+      await prefs.setString('roambite_anniversary', _anniversary!);
+    }
+    if (_gender != null) {
+      await prefs.setString('roambite_gender', _gender!);
+    }
+    if (_avatarUrl != null) {
+      await prefs.setString('roambite_avatar_url', _avatarUrl!);
+    }
+
+    if (SupabaseConfig.isConfigured && _userId != null) {
+      try {
+        await SupabaseService().setProfileRole(
+          userId: _userId!,
+          role: _role == UserRole.truckOwner ? 'truck_owner' : 'foodie',
+          displayName: _displayName,
+          phone: _phoneNumber,
+        );
+      } catch (e) {
+        debugPrint('Profile sync warning: $e');
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> setVegMode(bool enabled) async {
+    _vegMode = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('roambite_veg_mode', enabled);
+    notifyListeners();
+  }
+
   /// Sign In with Google
   Future<void> signInWithGoogle(UserRole selectedRole) async {
     _isLoading = true;
@@ -213,8 +293,6 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       if (SupabaseConfig.isConfigured) {
-        // Remember the picked role so the OAuth return can persist it,
-        // exactly as the phone-OTP path does via setProfileRole.
         _pendingGoogleRole = selectedRole;
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(
@@ -222,11 +300,10 @@ class AuthProvider extends ChangeNotifier {
             selectedRole == UserRole.truckOwner ? 'truck_owner' : 'foodie');
         await SupabaseService().signInWithGoogle();
       } else {
-        // Fallback for demo when backend credentials are pending
         await _setLocalSession(
           id: 'demo_google_user',
           role: selectedRole,
-          name: 'Google User',
+          name: 'Snehil Sahay',
         );
       }
     } catch (e) {
@@ -248,7 +325,6 @@ class AuthProvider extends ChangeNotifier {
       if (SupabaseConfig.isConfigured) {
         await SupabaseService().signInWithPhone(phone);
       }
-      // Demo simulated OTP succeeds
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -285,7 +361,7 @@ class AuthProvider extends ChangeNotifier {
         role: chosenRole,
         name: chosenRole == UserRole.truckOwner
             ? 'Food Truck Partner'
-            : 'Foodie Explorer',
+            : 'Snehil Sahay',
       );
     } finally {
       _isLoading = false;
@@ -306,7 +382,7 @@ class AuthProvider extends ChangeNotifier {
       role: chosenRole,
       name: chosenRole == UserRole.truckOwner
           ? 'Taco Trail Partner'
-          : 'Miami Foodie',
+          : 'Snehil Sahay',
     );
 
     _isLoading = false;
