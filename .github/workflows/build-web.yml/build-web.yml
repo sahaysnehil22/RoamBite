@@ -1,0 +1,25 @@
+name: Build RoamBite Web
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          cache: true
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Build web
+        run: flutter build web --dart-define SUPABASE_URL=${{ secrets.SUPABASE_URL }} --dart-define SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: roambite-web
+          path: build/web
