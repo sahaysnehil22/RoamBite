@@ -63,7 +63,7 @@ class SupabaseService {
   Future<bool> signInWithGoogle() async {
     final c = client;
     if (c == null) throw Exception('Backend is not configured. Provide SUPABASE_URL and SUPABASE_ANON_KEY.');
-    return await c.auth.signInWithOAuth(OAuthProvider.google, redirectTo: 'com.roambite.roambite://login-callback');
+    return await c.auth.signInWithOAuth(OAuthProvider.google, redirectTo: kIsWeb ? 'https://roambite-app-sahay-snehils-projects.vercel.app/' : 'com.roambite.roambite://login-callback');
   }
 
   /// Sign out
