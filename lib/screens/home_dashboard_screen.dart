@@ -7,6 +7,7 @@ import '../providers/auth_provider.dart';
 import '../services/demo_trucks.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
+import '../widgets/google_maps_directions_sheet.dart';
 import '../widgets/service_area_gate.dart';
 import 'profile_screen.dart';
 import 'truck_detail_screen.dart';
@@ -47,6 +48,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   bool _nearMeOnly = false;
   bool _topRatedOnly = false;
   bool _vegOnly = false;
+  bool _under12Only = false;
+  String _sortBy = 'rating'; // 'rating', 'distance', 'price'
   int _promoIndex = 0;
 
   static const double _nearMeMiles = 2.0;
@@ -219,7 +222,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       if (_topRatedOnly && t.rating < _topRatedThreshold) {
         return false;
       }
-      if (_vegOnly && !t.menu.any((m) => m.isVegetarian)) {
+      if ((_vegOnly || auth.vegMode) && !t.menu.any((m) => m.isVegetarian)) {
+        return false;
+      }
+      if (_under12Only && !t.menu.any((m) => m.price <= 12.0)) {
         return false;
       }
       if (query.isNotEmpty) {
@@ -234,8 +240,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
     final liveTrucks =
         filtered.where((t) => t.status == TruckStatus.servingNow).toList();
-    final recommended = [...filtered]
-      ..sort((a, b) => b.rating.compareTo(a.rating));
+    final recommended = [...filtered]..sort((a, b) {
+        if (_sortBy == 'distance') {
+          return a.distanceInMiles.compareTo(b.distanceInMiles);
+        }
+        if (_sortBy == 'price') {
+          return a.priceRange.length.compareTo(b.priceRange.length);
+        }
+        return b.rating.compareTo(a.rating);
+      });
 
     return Scaffold(
       body: SafeArea(
@@ -290,7 +303,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 ),
               ),
 
-              // 4. Filter Pills Row (Featuring "Near & Fast", "Open now", "Near me", "Top rated")
+              // 4. Filter Pills Row (Filters modal, Near & Fast, Pure Veg, Open now, Near me, Top rated, Under $12)
               SliverToBoxAdapter(
                 child: SizedBox(
                   height: 46,
@@ -298,6 +311,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ActionChip(
+                          avatar: const Icon(Icons.tune, size: 16),
+                          label: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Filters',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(width: 2),
+                              Icon(Icons.arrow_drop_down, size: 18),
+                            ],
+                          ),
+                          onPressed: () => _openFiltersSheet(auth),
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: FilterChip(
@@ -315,6 +346,36 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               const Color(0xFF00C853).withValues(alpha: 0.16),
                           onSelected: (selected) =>
                               setState(() => _nearAndFastOnly = selected),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          avatar: const Icon(
+                            Icons.eco,
+                            color: Color(0xFF00C853),
+                            size: 16,
+                          ),
+                          label: const Text(
+                            'Pure Veg / Options',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          selected: _vegOnly || auth.vegMode,
+                          selectedColor:
+                              const Color(0xFF00C853).withValues(alpha: 0.16),
+                          onSelected: (selected) {
+                            setState(() => _vegOnly = selected);
+                            auth.setVegMode(selected);
+                          },
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: const Text('Meals Under \$12'),
+                          selected: _under12Only,
+                          onSelected: (selected) =>
+                              setState(() => _under12Only = selected),
                         ),
                       ),
                       Padding(
@@ -598,22 +659,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         ),
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFFF3C4), Color(0xFFFFD54F)],
+                    InkWell(
+                      onTap: _openGoldPerksModal,
+                      borderRadius: BorderRadius.circular(18),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFFFF3C4), Color(0xFFFFD54F)],
+                          ),
+                          borderRadius: BorderRadius.circular(18),
                         ),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Text(
-                        'GOLD',
-                        style: TextStyle(
-                          color: Color(0xFF5D4037),
-                          fontWeight: FontWeight.w900,
-                          fontSize: 11,
-                          letterSpacing: 0.6,
+                        child: const Text(
+                          'GOLD',
+                          style: TextStyle(
+                            color: Color(0xFF5D4037),
+                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            letterSpacing: 0.6,
+                          ),
                         ),
                       ),
                     ),
@@ -690,7 +755,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: _openVoiceSearchSheet,
+                      borderRadius: BorderRadius.circular(24),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.mic_none_rounded,
+                          color: Color(0xFFE23744),
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -707,9 +790,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         SizedBox(
                           height: 28,
                           child: Switch(
-                            value: _vegOnly,
+                            value: _vegOnly || auth.vegMode,
                             activeThumbColor: const Color(0xFF00C853),
-                            onChanged: (val) => setState(() => _vegOnly = val),
+                            onChanged: (val) {
+                              setState(() => _vegOnly = val);
+                              auth.setVegMode(val);
+                            },
                           ),
                         ),
                       ],
@@ -1265,8 +1351,47 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       children: [
                         _buildStatusBadge(truck),
                         _buildTagChip('${truck.menu.length} Dishes'),
-                        _buildTagChip('${truck.videoReviews.length} Reviews'),
+                        _buildTagChip('${truck.videoReviews.length} Video Reels'),
                         if (truck.isSponsored) _buildTagChip('Sponsored'),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            foregroundColor: const Color(0xFF1A73E8),
+                            side: const BorderSide(color: Color(0xFF1A73E8)),
+                          ),
+                          onPressed: () => openGoogleMapsDirections(
+                            context,
+                            truck: truck,
+                            userLat: widget.currentLocation.latitude,
+                            userLng: widget.currentLocation.longitude,
+                          ),
+                          icon: const Icon(Icons.directions, size: 15),
+                          label: const Text(
+                            'Google Maps',
+                            style: TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF5722),
+                            foregroundColor: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () => _openTruckDetail(truck),
+                          icon: const Icon(Icons.restaurant_menu, size: 15),
+                          label: const Text(
+                            'Menu & Reels',
+                            style: TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -1276,6 +1401,318 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
           ),
         ),
       ),
+    );
+  }
+
+  void _openFiltersSheet(AuthProvider auth) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final theme = Theme.of(ctx);
+            return Container(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Filters & Sort',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w800),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setModalState(() {
+                            _nearAndFastOnly = false;
+                            _openNowOnly = false;
+                            _nearMeOnly = false;
+                            _topRatedOnly = false;
+                            _vegOnly = false;
+                            _under12Only = false;
+                            _selectedCuisine = 'All';
+                            _sortBy = 'rating';
+                          });
+                          setState(() {});
+                          auth.setVegMode(false);
+                        },
+                        child: const Text('Clear All'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Sort Trucks By',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Rating: High to Low'),
+                        selected: _sortBy == 'rating',
+                        onSelected: (_) {
+                          setModalState(() => _sortBy = 'rating');
+                          setState(() {});
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Nearest First'),
+                        selected: _sortBy == 'distance',
+                        onSelected: (_) {
+                          setModalState(() => _sortBy = 'distance');
+                          setState(() {});
+                        },
+                      ),
+                      ChoiceChip(
+                        label: const Text('Price: Low to High'),
+                        selected: _sortBy == 'price',
+                        onSelected: (_) {
+                          setModalState(() => _sortBy = 'price');
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 20),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Near & Fast (Under 1.0 mi • 6-10 mins)'),
+                    value: _nearAndFastOnly,
+                    activeColor: const Color(0xFF00C853),
+                    onChanged: (v) {
+                      setModalState(() => _nearAndFastOnly = v ?? false);
+                      setState(() {});
+                    },
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Veg Mode (Vegetarian Dish Options)'),
+                    value: _vegOnly || auth.vegMode,
+                    activeColor: const Color(0xFF00C853),
+                    onChanged: (v) {
+                      final val = v ?? false;
+                      setModalState(() => _vegOnly = val);
+                      setState(() {});
+                      auth.setVegMode(val);
+                    },
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Meals Under \$12'),
+                    value: _under12Only,
+                    activeColor: const Color(0xFFFF5722),
+                    onChanged: (v) {
+                      setModalState(() => _under12Only = v ?? false);
+                      setState(() {});
+                    },
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Serving Right Now'),
+                    value: _openNowOnly,
+                    activeColor: const Color(0xFFFF5722),
+                    onChanged: (v) {
+                      setModalState(() => _openNowOnly = v ?? false);
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF5722),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text(
+                        'Apply Filters',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _openVoiceSearchSheet() {
+    final samples = [
+      'Quesabirria',
+      'Smash Burger',
+      'Churros',
+      'Arepa',
+      'Elote',
+      'Truffle Fries',
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE23744).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.mic, color: Color(0xFFE23744), size: 32),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Voice & Instant Dish Search',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Tap any dish below or speak to filter live food trucks',
+                style: TextStyle(color: theme.hintColor, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: samples.map((q) {
+                  return ActionChip(
+                    avatar: const Icon(Icons.search, size: 15),
+                    label: Text(q),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _searchController.text = q;
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openGoldPerksModal() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(22),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A1714),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFFD54F),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.workspace_premium,
+                        color: Colors.black, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'RoamBite GOLD VIP Perks',
+                      style: TextStyle(
+                        color: Color(0xFFFFD54F),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '• Priority Walk-Up Window Queue at Partner Food Trucks\n'
+                '• Extra 15% OFF Combo Plates at Sponsored Wynwood Trucks\n'
+                '• Instant VIP Radar Arrival Alerts Before General Public',
+                style: TextStyle(color: Colors.white, fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD54F),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('RoamBite GOLD VIP benefits active!'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    'Active Gold Member • Apply Perks',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

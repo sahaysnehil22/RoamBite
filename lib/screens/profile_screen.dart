@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+import '../widgets/media_picker_sheet.dart';
 
 // Zomato-style Profile Overview & "Your Profile" Editor screen.
 // Preserves ThemeProvider (Light/Dark/System) and AuthProvider sign-out.
@@ -554,14 +555,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _selectedGender = 'Male';
   String _avatarUrl = '';
 
-  static const List<String> _presetAvatars = [
-    '',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80',
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80',
-    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=300&q=80',
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -597,104 +590,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return t[0].toUpperCase();
   }
 
-  void _openAvatarPickerSheet() {
-    final urlCtrl = TextEditingController(text: _avatarUrl);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Choose Profile Photo',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                height: 68,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _presetAvatars.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (context, idx) {
-                    final presetUrl = _presetAvatars[idx];
-                    final isSelected = _avatarUrl == presetUrl;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() => _avatarUrl = presetUrl);
-                        Navigator.pop(ctx);
-                      },
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isSelected
-                                ? const Color(0xFFFF5722)
-                                : Colors.grey.shade300,
-                            width: isSelected ? 3 : 1,
-                          ),
-                        ),
-                        child: presetUrl.isEmpty
-                            ? CircleAvatar(
-                                backgroundColor: const Color(0xFFD2E3FC),
-                                child: Text(
-                                  _firstInitial(_nameCtrl.text),
-                                  style: const TextStyle(
-                                    color: Color(0xFF174EA6),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 22,
-                                  ),
-                                ),
-                              )
-                            : CircleAvatar(
-                                backgroundImage: NetworkImage(presetUrl),
-                              ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: urlCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Or paste custom photo URL',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF5722),
-                  ),
-                  onPressed: () {
-                    setState(() => _avatarUrl = urlCtrl.text.trim());
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text(
-                    'Use Photo',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+  Future<void> _openAvatarPickerSheet() async {
+    final picked = await showRoamBiteMediaPicker(
+      context,
+      title: 'Upload Profile Photo (Camera or Gallery)',
+      allowVideo: false,
     );
+    if (picked != null && mounted) {
+      setState(() => _avatarUrl = picked.url);
+    }
   }
 
   Future<void> _saveProfile() async {

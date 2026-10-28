@@ -126,9 +126,41 @@ class DemoTrucks {
     );
   }
 
+  static final Set<String> _savedTruckIds = {
+    'a1111111-aaaa-1111-aaaa-111111111111',
+  };
+
+  static bool isTruckSaved(String truckId) => _savedTruckIds.contains(truckId);
+
+  static bool toggleSavedTruck(String truckId) {
+    if (_savedTruckIds.contains(truckId)) {
+      _savedTruckIds.remove(truckId);
+      return false;
+    } else {
+      _savedTruckIds.add(truckId);
+      return true;
+    }
+  }
+
+  static Set<String> get savedTruckIds => Set.unmodifiable(_savedTruckIds);
+
   static void addDishToTruck(String truckId, MenuItem newDish) {
     final current = getTruckById(truckId);
     final updatedMenu = [newDish, ...current.menu];
+    _sessionOverrides[truckId] = current.copyWith(menu: updatedMenu);
+  }
+
+  static void updateDishInTruck(String truckId, MenuItem updatedDish) {
+    final current = getTruckById(truckId);
+    final updatedMenu = current.menu
+        .map((m) => m.id == updatedDish.id ? updatedDish : m)
+        .toList();
+    _sessionOverrides[truckId] = current.copyWith(menu: updatedMenu);
+  }
+
+  static void deleteDishFromTruck(String truckId, String dishId) {
+    final current = getTruckById(truckId);
+    final updatedMenu = current.menu.where((m) => m.id != dishId).toList();
     _sessionOverrides[truckId] = current.copyWith(menu: updatedMenu);
   }
 
