@@ -27,6 +27,8 @@ class AuthProvider extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
   bool get isSignedIn => _isSignedIn;
+  bool get isAuthenticated => _isSignedIn;
+
   UserRole get role => _role;
   bool get isTruckOwner => _role == UserRole.truckOwner;
   String? get userId => _userId;
@@ -285,6 +287,14 @@ class AuthProvider extends ChangeNotifier {
     await prefs.setBool('roambite_veg_mode', enabled);
     notifyListeners();
   }
+
+  Future<void> selectRole(String role) async {
+    _role = role == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('roambite_user_role', _role == UserRole.truckOwner ? 'truck_owner' : 'foodie');
+    notifyListeners();
+  }
+  
 
   /// Sign In with Google
   Future<void> signInWithGoogle(UserRole selectedRole) async {
