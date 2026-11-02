@@ -44,6 +44,7 @@ class SupabaseService {
   }
 
   static const String _kOfflineTrucksCacheKey = 'roambite_cached_trucks_json';
+  static const String _kSavedTruckIdsKey = 'roambite_saved_truck_ids';
   static const String _kAlertEnabledKey = 'roambite_alert_enabled';
   static const String _kAlertRadiusMilesKey = 'roambite_alert_radius_miles';
   static const String _kQuietHoursEnabledKey = 'roambite_quiet_hours_enabled';
@@ -136,26 +137,103 @@ class SupabaseService {
     return 'foodie';
   }
 
-  /// Set or create profile with role
+  /// Fetch user profile fields (role, display_name, avatar_url) from profiles
+  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    final c = client;
+    if (c == null) return null;
+    try {
+      final res = await c
+          .from('profiles')
+          .select('role, display_name, phone, avatar_url')
+          .eq('id', userId)
+          .maybeSingle();
+      return res;
+    } catch (e) {
+      debugPrint('Error fetching user profile: $e');
+      return null;
+    }
+  }
+
+  /// Set or create profile with role and optional avatar_url
   Future<void> setProfileRole({
     required String userId,
     required String role,
     String? phone,
     String? displayName,
+    String? avatarUrl,
   }) async {
     final c = client;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('roambite_user_role', role);
 
     if (c != null) {
-      await c.from('profiles').upsert({
+      final payload = <String, dynamic>{
         'id': userId,
         'role': role,
         'phone': phone,
         'display_name': displayName ?? 'RoamBite Member',
         'updated_at': DateTime.now().toIso8601String(),
-      });
+      };
+      if (avatarUrl != null) {
+        payload['avatar_url'] = avatarUrl;
+      }
+      await c.from('profiles').upsert(payload);
     }
+  }
+
+  // --- SUPABASE STORAGE ('roambite-media' BUCKET) ---
+
+  /// Upload a picked photo or video file to the public 'roambite-media' bucket
+  /// under paths: reviews/<user_id>/..., avatars/<user_id>/..., or trucks/<truck_id>/...
+  /// Returns the public URL for storing in database columns.
+  Future<String> uploadMediaToBucket({
+    required String storageFolder,
+    required Uint8List bytes,
+    required String fileName,
+    bool isVideo = false,
+  }) async {
+    final c = client;
+    if (c == null) {
+      throw Exception(
+          'Backend is not configured. Please sign in with a live backend or paste a Custom URL.');
+    }
+
+    final cleanFolder =
+        storageFolder.replaceAll(RegExp(r'^/+|/+$'), '').trim();
+    final safeFileName = fileName.trim().isEmpty
+        ? (isVideo ? 'video.mp4' : 'photo.jpg')
+        : fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final objectPath = '$cleanFolder/${timestamp}_$safeFileName';
+
+    final lower = safeFileName.toLowerCase();
+    String contentType;
+    if (lower.endsWith('.png')) {
+      contentType = 'image/png';
+    } else if (lower.endsWith('.webp')) {
+      contentType = 'image/webp';
+    } else if (lower.endsWith('.gif')) {
+      contentType = 'image/gif';
+    } else if (lower.endsWith('.mp4')) {
+      contentType = 'video/mp4';
+    } else if (lower.endsWith('.mov')) {
+      contentType = 'video/quicktime';
+    } else if (lower.endsWith('.webm')) {
+      contentType = 'video/webm';
+    } else {
+      contentType = isVideo ? 'video/mp4' : 'image/jpeg';
+    }
+
+    await c.storage.from('roambite-media').uploadBinary(
+          objectPath,
+          bytes,
+          fileOptions: FileOptions(
+            contentType: contentType,
+            upsert: true,
+          ),
+        );
+
+    return c.storage.from('roambite-media').getPublicUrl(objectPath);
   }
 
   // --- ALERT RADIUS GEOFENCE SYSTEM ---
@@ -378,6 +456,209 @@ class SupabaseService {
       'is_live': true,
       'status': status,
     });
+
+    try {
+      await c.functions.invoke(
+        'send-truck-alerts',
+        body: {
+          'truck_id': truckId,
+          'latitude': latitude,
+          'longitude': longitude,
+          'recorded_at': now.toIso8601String(),
+        },
+      );
+    } catch (e) {
+      debugPrint('send-truck-alerts edge function skip: $e');
+    }
+  }
+
+  // --- FAVOURITES (saved_trucks) & LIVE PROMOTIONS (promotions) ---
+
+  /// Load saved truck IDs from `saved_trucks` for the signed-in user, or from
+  /// local state / SharedPreferences in demo mode.
+  Future<Set<String>> fetchSavedTruckIds() async {
+    final c = client;
+    final user = c?.auth.currentUser;
+    if (c != null && user != null) {
+      try {
+        final rows = await c
+            .from('saved_trucks')
+            .select('truck_id')
+            .eq('user_id', user.id)
+            .order('created_at', ascending: false);
+        final ids = <String>{};
+        for (final row in (rows as List<dynamic>)) {
+          final id = row['truck_id']?.toString();
+          if (id != null && id.isNotEmpty) {
+            ids.add(id);
+          }
+        }
+        DemoTrucks.setSavedTruckIds(ids);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setStringList(_kSavedTruckIdsKey, ids.toList());
+        return ids;
+      } catch (e) {
+        debugPrint('Supabase fetchSavedTruckIds fallback: $e');
+      }
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getStringList(_kSavedTruckIdsKey);
+      if (stored != null) {
+        DemoTrucks.setSavedTruckIds(stored);
+      }
+    } catch (_) {}
+    return DemoTrucks.savedTruckIds;
+  }
+
+  /// Toggle saved state for [truckId]. Inserts/deletes in `saved_trucks` when
+  /// signed in to Supabase, and updates local state in demo mode.
+  Future<bool> toggleSavedTruck(String truckId) async {
+    final nowSaved = DemoTrucks.toggleSavedTruck(truckId);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+          _kSavedTruckIdsKey, DemoTrucks.savedTruckIds.toList());
+    } catch (_) {}
+
+    final c = client;
+    final user = c?.auth.currentUser;
+    if (c != null && user != null) {
+      try {
+        if (nowSaved) {
+          await c.from('saved_trucks').upsert(
+            {
+              'user_id': user.id,
+              'truck_id': truckId,
+            },
+            onConflict: 'user_id,truck_id',
+          );
+        } else {
+          await c
+              .from('saved_trucks')
+              .delete()
+              .eq('user_id', user.id)
+              .eq('truck_id', truckId);
+        }
+      } catch (e) {
+        debugPrint('Supabase toggleSavedTruck fallback: $e');
+      }
+    }
+    return nowSaved;
+  }
+
+  /// Return the list of saved [FoodTruck] objects for the current user.
+  Future<List<FoodTruck>> fetchSavedTrucks({
+    double? userLat,
+    double? userLng,
+  }) async {
+    final savedIds = await fetchSavedTruckIds();
+    if (savedIds.isEmpty) return [];
+
+    final lat = userLat ?? DemoTrucks.miamiHub.latitude;
+    final lng = userLng ?? DemoTrucks.miamiHub.longitude;
+    final liveOrDemo = await fetchLiveTrucks(userLat: lat, userLng: lng);
+    final byId = <String, FoodTruck>{
+      for (final t in DemoTrucks.forLocation(userLat: lat, userLng: lng))
+        t.id: t,
+      for (final t in liveOrDemo) t.id: t,
+    };
+
+    final result = <FoodTruck>[];
+    for (final id in savedIds) {
+      final match = byId[id];
+      if (match != null) {
+        result.add(match);
+      }
+    }
+    return result;
+  }
+
+  static int _parseHexColor(String? hexStr, int fallback) {
+    if (hexStr == null || hexStr.trim().isEmpty) return fallback;
+    final cleaned = hexStr.trim().replaceAll('#', '').replaceAll('0x', '');
+    final withAlpha = cleaned.length == 6 ? 'FF$cleaned' : cleaned;
+    return int.tryParse(withAlpha, radix: 16) ?? fallback;
+  }
+
+  /// Fetch active promotions from `promotions` (is_active = true, order by sort_order).
+  /// Falls back to `DemoTrucks.heroPromotions` when the table is empty or unreachable.
+  Future<List<PromoBanner>> fetchActivePromotions() async {
+    final c = client;
+    if (c != null) {
+      try {
+        final rows = await c
+            .from('promotions')
+            .select(
+                'id, truck_id, tag, headline_top, headline_bottom, subtext, cta_text, image_url, primary_color_hex, secondary_color_hex, is_active, sort_order, created_at')
+            .eq('is_active', true)
+            .order('sort_order', ascending: true);
+
+        final promos = <PromoBanner>[];
+        for (final row in (rows as List<dynamic>)) {
+          promos.add(
+            PromoBanner(
+              id: row['id']?.toString() ?? 'promo',
+              truckId: row['truck_id']?.toString() ?? '',
+              badgeText: row['tag'] as String? ?? '',
+              headlineTop: row['headline_top'] as String? ?? '',
+              headlineMain: row['headline_bottom'] as String? ?? '',
+              subheadline: row['subtext'] as String? ?? '',
+              ctaText: row['cta_text'] as String? ?? 'Explore',
+              imageUrl: row['image_url'] as String? ?? '',
+              primaryColorHex: _parseHexColor(
+                  row['primary_color_hex'] as String?, 0xFFD93829),
+              secondaryColorHex: _parseHexColor(
+                  row['secondary_color_hex'] as String?, 0xFFB71C1C),
+            ),
+          );
+        }
+        if (promos.isNotEmpty) {
+          return promos;
+        }
+      } catch (e) {
+        debugPrint('Supabase fetchActivePromotions fallback: $e');
+      }
+    }
+    return DemoTrucks.heroPromotions;
+  }
+
+  // --- PUSH NOTIFICATIONS (FCM TOKEN) ---
+
+  /// Store the device FCM token on `profiles.fcm_token` for the signed-in user.
+  Future<void> saveFcmToken(String token) async {
+    if (token.trim().isEmpty) return;
+    final c = client;
+    final user = c?.auth.currentUser;
+    if (c == null || user == null) return;
+    try {
+      await c.from('profiles').update({
+        'fcm_token': token.trim(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user.id);
+    } catch (e) {
+      debugPrint('Supabase saveFcmToken warning: $e');
+    }
+  }
+
+  /// Resolve a single [FoodTruck] by ID for push notification deep-links.
+  Future<FoodTruck?> fetchTruckById(String truckId) async {
+    final cleanId = truckId.trim();
+    if (cleanId.isEmpty) return null;
+    try {
+      final trucks = await fetchLiveTrucks(
+        userLat: DemoTrucks.miamiHub.latitude,
+        userLng: DemoTrucks.miamiHub.longitude,
+      );
+      for (final t in trucks) {
+        if (t.id == cleanId) return t;
+      }
+    } catch (_) {}
+    for (final t in DemoTrucks.miamiHubTrucks) {
+      if (t.id == cleanId) return t;
+    }
+    return DemoTrucks.getTruckById(cleanId);
   }
 
   /// Update Truck Profile & Radar Avatar in both Demo session and Supabase

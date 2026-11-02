@@ -1,13 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/food_truck.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/demo_trucks.dart';
+import '../services/supabase_service.dart';
 import '../widgets/media_picker_sheet.dart';
+import 'truck_detail_screen.dart';
 
 // Zomato-style Profile Overview & "Your Profile" Editor screen.
 // Preserves ThemeProvider (Light/Dark/System) and AuthProvider sign-out.
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  List<FoodTruck> _savedTrucks = [];
+  bool _loadingSaved = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedTrucks();
+  }
+
+  Future<void> _loadSavedTrucks() async {
+    final trucks = await SupabaseService().fetchSavedTrucks();
+    if (!mounted) return;
+    setState(() {
+      _savedTrucks = trucks;
+      _loadingSaved = false;
+    });
+  }
+
+  Future<void> _toggleSaved(FoodTruck truck) async {
+    final nowSaved = await SupabaseService().toggleSavedTruck(truck.id);
+    if (!mounted) return;
+    await _loadSavedTrucks();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(nowSaved
+            ? 'Saved ${truck.name} to your Saved list'
+            : 'Removed ${truck.name} from Saved'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   String _firstInitial(String? displayName) {
     final trimmed = (displayName ?? '').trim();
@@ -397,19 +440,108 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
                 ListTile(
+                  leading: const Icon(
+                    Icons.favorite,
+                    color: Color(0xFFFF5722),
+                  ),
+                  title: Text(
+                    'Saved trucks (${_savedTrucks.length})',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    _savedTrucks.isEmpty
+                        ? 'Tap the heart on any truck to save it here'
+                        : _savedTrucks.map((t) => t.name).join(' • '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: theme.hintColor),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: theme.hintColor),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const SavedTrucksScreen(),
+                      ),
+                    );
+                    if (mounted) {
+                      _loadSavedTrucks();
+                    }
+                  },
+                ),
+                if (!_loadingSaved && _savedTrucks.isNotEmpty) ...[
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    child: Column(
+                      children: _savedTrucks.map((truck) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: theme.scaffoldBackgroundColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: theme.dividerColor),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 2),
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                truck.effectiveProfileImage,
+                                width: 46,
+                                height: 46,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  width: 46,
+                                  height: 46,
+                                  color: Colors.grey.shade300,
+                                  child: const Icon(Icons.local_shipping,
+                                      size: 20),
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              truck.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13.5),
+                            ),
+                            subtitle: Text(
+                              '${truck.cuisine} • ${truck.distanceInMiles} mi',
+                              style: TextStyle(
+                                  fontSize: 11.5, color: theme.hintColor),
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Unsave truck',
+                              icon: const Icon(
+                                Icons.favorite,
+                                color: Color(0xFFFF5722),
+                                size: 20,
+                              ),
+                              onPressed: () => _toggleSaved(truck),
+                            ),
+                            onTap: () async {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      TruckDetailScreen(truck: truck),
+                                ),
+                              );
+                              if (mounted) {
+                                _loadSavedTrucks();
+                              }
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+                Divider(height: 1, color: theme.dividerColor),
+                ListTile(
                   leading: const Icon(Icons.rate_review_outlined),
                   title: const Text(
                     'Your truck reviews & videos',
-                    style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: theme.hintColor),
-                  onTap: () => Navigator.of(context).maybePop(),
-                ),
-                Divider(height: 1, color: theme.dividerColor),
-                ListTile(
-                  leading: const Icon(Icons.bookmark_border),
-                  title: const Text(
-                    'Your collections',
                     style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
                   ),
                   trailing: Icon(Icons.chevron_right, color: theme.hintColor),
@@ -591,13 +723,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _openAvatarPickerSheet() async {
+    final auth = context.read<AuthProvider>();
+    final userId = auth.userId ?? 'anonymous';
     final picked = await showRoamBiteMediaPicker(
       context,
       title: 'Upload Profile Photo (Camera or Gallery)',
+      storageFolder: 'avatars/$userId',
       allowVideo: false,
     );
     if (picked != null && mounted) {
       setState(() => _avatarUrl = picked.url);
+      await auth.updateUserProfile(
+        displayName: _nameCtrl.text,
+        phoneNumber: _mobileCtrl.text,
+        email: _emailCtrl.text,
+        dateOfBirth: _dobCtrl.text,
+        anniversary: _anniversaryCtrl.text,
+        gender: _selectedGender,
+        avatarUrl: picked.url,
+      );
     }
   }
 
@@ -883,6 +1027,159 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Dedicated Saved Trucks screen opened from Profile -> Saved trucks.
+class SavedTrucksScreen extends StatefulWidget {
+  const SavedTrucksScreen({super.key});
+
+  @override
+  State<SavedTrucksScreen> createState() => _SavedTrucksScreenState();
+}
+
+class _SavedTrucksScreenState extends State<SavedTrucksScreen> {
+  List<FoodTruck> _savedTrucks = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSaved();
+  }
+
+  Future<void> _loadSaved() async {
+    setState(() => _isLoading = true);
+    final trucks = await SupabaseService().fetchSavedTrucks();
+    if (!mounted) return;
+    setState(() {
+      _savedTrucks = trucks;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _unsaveTruck(FoodTruck truck) async {
+    await SupabaseService().toggleSavedTruck(truck.id);
+    if (!mounted) return;
+    setState(() {
+      _savedTrucks = DemoTrucks.getSavedTrucks();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Removed ${truck.name} from Saved'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Saved Food Trucks',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _savedTrucks.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.favorite_border,
+                          size: 52,
+                          color: theme.hintColor,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No saved food trucks yet',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Tap the heart icon on any food truck card or detail screen to save it to your list.',
+                          textAlign: TextAlign.center,
+                          style:
+                              TextStyle(color: theme.hintColor, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _savedTrucks.length,
+                  itemBuilder: (context, index) {
+                    final truck = _savedTrucks[index];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.all(12),
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.network(
+                            truck.effectiveProfileImage,
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              width: 60,
+                              height: 60,
+                              color: Colors.grey.shade300,
+                              child: const Icon(Icons.local_shipping),
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          truck.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${truck.cuisine} • ${truck.rating} ★ • ${truck.distanceInMiles} mi',
+                          style:
+                              TextStyle(color: theme.hintColor, fontSize: 12),
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Remove from Saved',
+                          icon: const Icon(
+                            Icons.favorite,
+                            color: Color(0xFFFF5722),
+                          ),
+                          onPressed: () => _unsaveTruck(truck),
+                        ),
+                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => TruckDetailScreen(truck: truck),
+                            ),
+                          );
+                          if (mounted) {
+                            _loadSaved();
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }

@@ -40,6 +40,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   Timer? _autoSlideTimer;
 
   List<FoodTruck> _trucks = [];
+  List<PromoBanner> _promotions = DemoTrucks.heroPromotions;
+  Set<String> _savedTruckIds = DemoTrucks.savedTruckIds;
   bool _isLoading = true;
   bool _isDemoFallback = false;
   String _selectedCuisine = 'All';
@@ -65,7 +67,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
     _autoSlideTimer = Timer.periodic(const Duration(milliseconds: 3800), (_) {
       if (!mounted || !_promoController.hasClients) return;
-      final total = DemoTrucks.heroPromotions.length;
+      final total = _promotions.length;
       if (total <= 1) return;
       final next = (_promoIndex + 1) % total;
       _promoController.animateToPage(
@@ -102,12 +104,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       return;
     }
     if (!SupabaseConfig.isConfigured) {
+      final savedIds = await SupabaseService().fetchSavedTruckIds();
       if (mounted) {
         setState(() {
           _trucks = DemoTrucks.forLocation(
             userLat: widget.currentLocation.latitude,
             userLng: widget.currentLocation.longitude,
           );
+          _promotions = DemoTrucks.heroPromotions;
+          _savedTruckIds = savedIds;
           _isLoading = false;
           _isDemoFallback = true;
         });
@@ -119,6 +124,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       userLat: widget.currentLocation.latitude,
       userLng: widget.currentLocation.longitude,
     );
+    final promos = await SupabaseService().fetchActivePromotions();
+    final savedIds = await SupabaseService().fetchSavedTruckIds();
     if (mounted) {
       setState(() {
         _trucks = results.isEmpty
@@ -130,10 +137,30 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 .where(
                     (t) => t.distanceInMiles <= LocationService.kServiceRadiusMiles)
                 .toList();
+        _promotions =
+            promos.isNotEmpty ? promos : DemoTrucks.heroPromotions;
+        _savedTruckIds = savedIds;
         _isDemoFallback = results.isEmpty;
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _toggleSaved(FoodTruck truck) async {
+    final nowSaved = await SupabaseService().toggleSavedTruck(truck.id);
+    if (!mounted) return;
+    setState(() {
+      _savedTruckIds = DemoTrucks.savedTruckIds;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(nowSaved
+            ? 'Saved ${truck.name} to your Saved list'
+            : 'Removed ${truck.name} from Saved'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -577,7 +604,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   /// search bar, VEG MODE switch, and auto-advancing animated promotions.
   Widget _buildZomatoUpperHeroSection(
       ThemeData theme, AuthProvider auth, String query) {
-    final promos = DemoTrucks.heroPromotions;
+    final promos =
+        _promotions.isNotEmpty ? _promotions : DemoTrucks.heroPromotions;
     final currentPromo = promos[_promoIndex % promos.length];
     final primaryBg = Color(currentPromo.primaryColorHex);
     final secondaryBg = Color(currentPromo.secondaryColorHex);
@@ -1147,6 +1175,30 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   ),
                 ),
                 Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => _toggleSaved(truck),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          _savedTruckIds.contains(truck.id)
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          size: 16,
+                          color: _savedTruckIds.contains(truck.id)
+                              ? const Color(0xFFFF5722)
+                              : Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
                   bottom: 8,
                   left: 8,
                   child: Container(
@@ -1307,6 +1359,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: _savedTruckIds.contains(truck.id)
+                              ? 'Unsave truck'
+                              : 'Save truck',
+                          onPressed: () => _toggleSaved(truck),
+                          icon: Icon(
+                            _savedTruckIds.contains(truck.id)
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            size: 20,
+                            color: _savedTruckIds.contains(truck.id)
+                                ? const Color(0xFFFF5722)
+                                : Colors.grey,
                           ),
                         ),
                       ],

@@ -167,6 +167,7 @@ class _MenuEditorScreenState extends State<MenuEditorScreen> {
                                       ctx,
                                       title:
                                           'Upload Dish Photo (Camera or Gallery)',
+                                      storageFolder: 'trucks/${widget.truckId}',
                                       allowVideo: false,
                                     );
                                     if (picked != null) {
@@ -174,6 +175,36 @@ class _MenuEditorScreenState extends State<MenuEditorScreen> {
                                         selectedImageUrl = picked.url;
                                         imageSourceLabel = picked.sourceLabel;
                                       });
+                                      if (isEditing) {
+                                        final updatedDish = MenuItem(
+                                          id: existingDish.id,
+                                          name: nameCtrl.text.trim().isEmpty
+                                              ? existingDish.name
+                                              : nameCtrl.text.trim(),
+                                          description:
+                                              descCtrl.text.trim().isEmpty
+                                                  ? existingDish.description
+                                                  : descCtrl.text.trim(),
+                                          price: double.tryParse(
+                                                  priceCtrl.text.trim()) ??
+                                              existingDish.price,
+                                          imageUrl: picked.url,
+                                          isSignature: isSignature,
+                                          isVegetarian: isVegetarian,
+                                        );
+                                        DemoTrucks.updateDishInTruck(
+                                            widget.truckId, updatedDish);
+                                        if (mounted) {
+                                          setState(() {
+                                            _items = List<MenuItem>.from(
+                                              DemoTrucks.getTruckById(
+                                                      widget.truckId)
+                                                  .menu,
+                                            );
+                                          });
+                                        }
+                                        await _syncMenuToSupabase();
+                                      }
                                     }
                                   },
                                   icon: const Icon(Icons.add_a_photo, size: 15),

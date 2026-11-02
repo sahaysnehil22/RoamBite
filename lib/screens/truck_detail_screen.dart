@@ -247,11 +247,19 @@ class _TruckDetailScreenState extends State<TruckDetailScreen> {
                                             color: Color(0xFFFF5722)),
                                       ),
                                       onPressed: () async {
+                                        final userId = SupabaseService()
+                                                .client
+                                                ?.auth
+                                                .currentUser
+                                                ?.id ??
+                                            auth.userId ??
+                                            'anonymous';
                                         final picked =
                                             await showRoamBiteMediaPicker(
                                           ctx,
                                           title:
                                               'Upload Review Photo or Video Reel',
+                                          storageFolder: 'reviews/$userId',
                                           allowVideo: true,
                                           defaultToVideo: isVideoReview,
                                         );
@@ -327,6 +335,8 @@ class _TruckDetailScreenState extends State<TruckDetailScreen> {
                                   return;
                                 }
                                 setModalState(() => isSubmitting = true);
+                                final resolvedVideoUrl =
+                                    isVideoReview ? attachedMediaUrl : '';
                                 final newRev = VideoReview(
                                   id: 'rev_${DateTime.now().millisecondsSinceEpoch}',
                                   userName: auth.displayName ?? 'Snehil Sahay',
@@ -337,9 +347,7 @@ class _TruckDetailScreenState extends State<TruckDetailScreen> {
                                   rating: selectedRating,
                                   quote: commentCtrl.text.trim(),
                                   thumbnailUrl: attachedMediaUrl,
-                                  videoUrl: isVideoReview
-                                      ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
-                                      : '',
+                                  videoUrl: resolvedVideoUrl,
                                   timeAgo: 'Just now',
                                   isVideo: isVideoReview,
                                   mediaCaption: captionCtrl.text.trim().isEmpty
@@ -370,12 +378,23 @@ class _TruckDetailScreenState extends State<TruckDetailScreen> {
                                       reviewerName: newRev.userName,
                                       reviewerAvatarUrl: newRev.userAvatar,
                                       mediaUrl: attachedMediaUrl,
-                                      videoUrl: newRev.videoUrl,
+                                      videoUrl: resolvedVideoUrl,
                                       isVideo: isVideoReview,
                                       mediaCaption: newRev.mediaCaption,
                                       duration: attachedDuration,
                                     );
-                                  } catch (_) {}
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Saved locally. Sign in with a live account to sync review to cloud.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
                                 }
 
                                 if (mounted) {
@@ -441,20 +460,22 @@ class _TruckDetailScreenState extends State<TruckDetailScreen> {
               IconButton(
                 tooltip: _isSaved ? 'Saved' : 'Save Truck',
                 style: IconButton.styleFrom(backgroundColor: Colors.black45),
-                onPressed: () {
-                  final nowSaved = DemoTrucks.toggleSavedTruck(_truck.id);
+                onPressed: () async {
+                  final nowSaved =
+                      await SupabaseService().toggleSavedTruck(_truck.id);
+                  if (!mounted) return;
                   setState(() => _isSaved = nowSaved);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(nowSaved
-                          ? 'Saved ${_truck.name} to your Favorites!'
-                          : 'Removed ${_truck.name} from Favorites.'),
+                          ? 'Saved ${_truck.name} to your Saved list!'
+                          : 'Removed ${_truck.name} from Saved.'),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
                 },
                 icon: Icon(
-                  _isSaved ? Icons.bookmark : Icons.bookmark_border,
+                  _isSaved ? Icons.favorite : Icons.favorite_border,
                   color: _isSaved ? const Color(0xFFFF5722) : Colors.white,
                 ),
               ),

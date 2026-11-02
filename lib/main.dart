@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/auth_screen.dart';
+import 'services/push_notification_service.dart';
 import 'services/supabase_service.dart';
 import 'shells/foodie_shell.dart';
 import 'shells/truck_owner_shell.dart';
@@ -20,6 +21,9 @@ void main() async {
 
   // Initialize Supabase if configured via --dart-define
   await SupabaseService.initialize();
+
+  // Initialize FCM push notifications (gracefully skips if google-services.json is absent)
+  await PushNotificationService().initialize();
 
   runApp(
     MultiProvider(
@@ -41,6 +45,7 @@ class RoamBiteApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'RoamBite',
+      navigatorKey: roamBiteNavigatorKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme, // Light theme is DEFAULT (Phase 5)
       darkTheme: AppTheme.darkTheme,
