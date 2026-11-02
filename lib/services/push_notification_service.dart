@@ -143,7 +143,7 @@ class PushNotificationService {
         action: truckId != null
             ? SnackBarAction(
                 label: 'View',
-                textColor: AppTheme.primaryOrange,
+                textColor: AppTheme.primaryColor,
                 onPressed: () => _openTruckById(truckId),
               )
             : null,
