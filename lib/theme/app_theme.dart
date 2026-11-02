@@ -5,8 +5,10 @@ class AppTheme {
   static const Color primaryVariant = Color(0xFFE64A19);
   static const Color secondaryColor = Color(0xFFFFB300); // Warm Golden Amber
   static const Color accentGreen = Color(0xFF00C853); // Live Serving Green
+  static const Color charcoal = Color(0xFF212121);
+  
 
-  // Light Theme (DEFAULT)
+// Light Theme (DEFAULT)
   static final ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     brightness: Brightness.light,
