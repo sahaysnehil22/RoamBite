@@ -7,7 +7,6 @@ class AppTheme {
   static const Color accentGreen = Color(0xFF00C853); // Live Serving Green
   static const Color charcoal = Color(0xFF212121);
   
-
 // Light Theme (DEFAULT)
   static final ThemeData lightTheme = ThemeData(
     useMaterial3: true,
