@@ -14,6 +14,10 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>RoamBite needs your location to discover live food trucks near you.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>RoamBite uses your camera to take photos and videos for food truck reviews, profile avatars, and dish menus.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>RoamBite accesses your photo library so you can upload photos and videos for reviews, profile avatars, and truck menus.</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

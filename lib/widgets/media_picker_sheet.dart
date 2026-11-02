@@ -1,10 +1,12 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import '../services/supabase_service.dart';
 
 class PickedMediaResult {
   final String url;
   final bool isVideo;
-  final String sourceLabel; // 'Camera Capture' or 'Photo Gallery' or 'Custom URL'
+  final String sourceLabel; // 'Camera Photo', 'Gallery Photo', 'Custom URL', etc.
   final String duration;
 
   const PickedMediaResult({
@@ -15,15 +17,15 @@ class PickedMediaResult {
   });
 }
 
-/// Shows an interactive "Upload from Gallery or Capture from Camera" bottom sheet.
-/// Used across:
-/// - Foodie "Drop a Review" (photo or video reel upload)
-/// - Truck Owner Menu Editor (dish photo upload)
-/// - Truck Owner Dashboard (truck profile & radar avatar upload)
-/// - Foodie "Your Profile" (user avatar upload)
+/// Shows an interactive Camera / Gallery / Custom URL media picker bottom sheet.
+/// Picks a real photo or video via [ImagePicker] (`ImageSource.camera` /
+/// `ImageSource.gallery`), uploads it to the `roambite-media` Supabase Storage
+/// bucket under [storageFolder] (`reviews/<user_id>`, `avatars/<user_id>`,
+/// `trucks/<truck_id>`), and returns the public URL.
 Future<PickedMediaResult?> showRoamBiteMediaPicker(
   BuildContext context, {
   required String title,
+  String storageFolder = 'uploads/general',
   bool allowVideo = false,
   bool defaultToVideo = false,
 }) async {
@@ -33,6 +35,7 @@ Future<PickedMediaResult?> showRoamBiteMediaPicker(
     backgroundColor: Colors.transparent,
     builder: (ctx) => _RoamBiteMediaPickerSheet(
       title: title,
+      storageFolder: storageFolder,
       allowVideo: allowVideo,
       defaultToVideo: defaultToVideo,
     ),
@@ -41,11 +44,13 @@ Future<PickedMediaResult?> showRoamBiteMediaPicker(
 
 class _RoamBiteMediaPickerSheet extends StatefulWidget {
   final String title;
+  final String storageFolder;
   final bool allowVideo;
   final bool defaultToVideo;
 
   const _RoamBiteMediaPickerSheet({
     required this.title,
+    required this.storageFolder,
     required this.allowVideo,
     required this.defaultToVideo,
   });
@@ -56,100 +61,11 @@ class _RoamBiteMediaPickerSheet extends StatefulWidget {
 }
 
 class _RoamBiteMediaPickerSheetState extends State<_RoamBiteMediaPickerSheet> {
-  // 0 = Action Chooser (Camera vs Gallery), 1 = Live Camera Viewfinder, 2 = Gallery Grid
-  int _step = 0;
-  late bool _isVideoMode;
-  bool _flashOn = false;
-  bool _frontCamera = false;
-  bool _isRecording = false;
-  int _recordSeconds = 0;
-  Timer? _recordTimer;
-  int _cameraPreviewIndex = 0;
+  final ImagePicker _picker = ImagePicker();
   final TextEditingController _customUrlCtrl = TextEditingController();
-
-  static const List<Map<String, String>> _cameraDishShots = [
-    {
-      'label': 'Fresh Sizzling Quesabirria Plate',
-      'url':
-          'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=900&q=80',
-      'duration': '0:16',
-    },
-    {
-      'label': 'Double Smash Burger off the Grill',
-      'url':
-          'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80',
-      'duration': '0:19',
-    },
-    {
-      'label': 'Caramelized Cinnamon Sugar Churros',
-      'url':
-          'https://images.unsplash.com/photo-1624371414361-e670edf4898d?auto=format&fit=crop&w=900&q=80',
-      'duration': '0:14',
-    },
-    {
-      'label': 'Stuffed Reina Pepiada Arepa',
-      'url':
-          'https://images.unsplash.com/photo-1599974579688-8dbdd335c77f?auto=format&fit=crop&w=900&q=80',
-      'duration': '0:18',
-    },
-    {
-      'label': 'Food Truck Serving Window Live',
-      'url':
-          'https://images.unsplash.com/photo-1565123409695-7b5ef63a2efb?auto=format&fit=crop&w=900&q=80',
-      'duration': '0:21',
-    },
-  ];
-
-  static const List<Map<String, String>> _galleryItems = [
-    {
-      'label': 'Birria Dip & Consome',
-      'url':
-          'https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:15',
-    },
-    {
-      'label': 'Loaded Truffle Fries',
-      'url':
-          'https://images.unsplash.com/photo-1576107232684-1279f3908594?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:12',
-    },
-    {
-      'label': 'Grilled Street Elote',
-      'url':
-          'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:17',
-    },
-    {
-      'label': 'Cold Brew Horchata Latte',
-      'url':
-          'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:14',
-    },
-    {
-      'label': 'Crispy Sweet Plantains',
-      'url':
-          'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:16',
-    },
-    {
-      'label': 'Wynwood Food Truck Night',
-      'url':
-          'https://images.unsplash.com/photo-1525164286253-04e68b9d94c6?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:22',
-    },
-    {
-      'label': 'Chef Plating Tacos',
-      'url':
-          'https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?auto=format&fit=crop&w=800&q=80',
-      'duration': '0:19',
-    },
-    {
-      'label': 'Foodie Portrait Avatar',
-      'url':
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
-      'duration': '0:10',
-    },
-  ];
+  late bool _isVideoMode;
+  bool _isUploading = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -159,51 +75,129 @@ class _RoamBiteMediaPickerSheetState extends State<_RoamBiteMediaPickerSheet> {
 
   @override
   void dispose() {
-    _recordTimer?.cancel();
     _customUrlCtrl.dispose();
     super.dispose();
   }
 
-  void _handleCameraCapture() {
-    final shot = _cameraDishShots[_cameraPreviewIndex % _cameraDishShots.length];
-    if (_isVideoMode) {
-      if (!_isRecording) {
+  Future<void> _pickAndUpload(ImageSource source) async {
+    if (_isUploading) return;
+    setState(() {
+      _errorMessage = null;
+    });
+
+    XFile? pickedFile;
+    try {
+      if (_isVideoMode) {
+        pickedFile = await _picker.pickVideo(
+          source: source,
+          maxDuration: const Duration(seconds: 30),
+        );
+      } else {
+        pickedFile = await _picker.pickImage(
+          source: source,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 85,
+        );
+      }
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      final code = e.code.toLowerCase();
+      final msg = (e.message ?? '').toLowerCase();
+      if (code.contains('denied') ||
+          code.contains('access') ||
+          code.contains('permission') ||
+          msg.contains('denied') ||
+          msg.contains('permission')) {
         setState(() {
-          _isRecording = true;
-          _recordSeconds = 1;
-        });
-        _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (!mounted) return;
-          setState(() => _recordSeconds++);
-          if (_recordSeconds >= 15) {
-            _finishRecording(shot);
-          }
+          _errorMessage =
+              'Camera or photo access was denied. Please enable permission in your device settings or use a Custom URL below.';
         });
       } else {
-        _finishRecording(shot);
+        setState(() {
+          _errorMessage =
+              'Could not open ${source == ImageSource.camera ? 'camera' : 'gallery'}: ${e.message ?? e.code}';
+        });
       }
-    } else {
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage =
+            'Could not access ${source == ImageSource.camera ? 'camera' : 'gallery'} on this device. You can paste a Custom URL below.';
+      });
+      return;
+    }
+
+    // User canceled the native picker
+    if (pickedFile == null) {
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isUploading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final bytes = await pickedFile.readAsBytes();
+      final rawName = pickedFile.name.isNotEmpty
+          ? pickedFile.name
+          : (_isVideoMode ? 'capture.mp4' : 'capture.jpg');
+
+      final publicUrl = await SupabaseService().uploadMediaToBucket(
+        storageFolder: widget.storageFolder,
+        bytes: bytes,
+        fileName: rawName,
+        isVideo: _isVideoMode,
+      );
+
+      if (!mounted) return;
+      final label = source == ImageSource.camera
+          ? (_isVideoMode ? 'Camera Video' : 'Camera Photo')
+          : (_isVideoMode ? 'Gallery Video' : 'Gallery Photo');
+
       Navigator.pop(
         context,
         PickedMediaResult(
-          url: shot['url']!,
-          isVideo: false,
-          sourceLabel: 'Camera Photo (${shot['label']})',
+          url: publicUrl,
+          isVideo: _isVideoMode,
+          sourceLabel: label,
+          duration: '0:15',
         ),
       );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isUploading = false;
+        _errorMessage =
+            'Upload failed. Please check your connection and sign-in status, or use a Custom URL below.';
+      });
     }
   }
 
-  void _finishRecording(Map<String, String> shot) {
-    _recordTimer?.cancel();
-    final secs = _recordSeconds.clamp(3, 59).toString().padLeft(2, '0');
+  void _submitCustomUrl() {
+    final text = _customUrlCtrl.text.trim();
+    if (text.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter a valid image or video URL.';
+      });
+      return;
+    }
+    final uri = Uri.tryParse(text);
+    if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {
+      setState(() {
+        _errorMessage = 'Please enter a valid http:// or https:// URL.';
+      });
+      return;
+    }
     Navigator.pop(
       context,
       PickedMediaResult(
-        url: shot['url']!,
-        isVideo: true,
-        sourceLabel: 'Camera Video Reel (${shot['label']})',
-        duration: '0:$secs',
+        url: text,
+        isVideo: _isVideoMode,
+        sourceLabel: 'Custom URL',
       ),
     );
   }
@@ -240,26 +234,9 @@ class _RoamBiteMediaPickerSheetState extends State<_RoamBiteMediaPickerSheet> {
             const SizedBox(height: 14),
             Row(
               children: [
-                if (_step != 0)
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () {
-                      _recordTimer?.cancel();
-                      setState(() {
-                        _isRecording = false;
-                        _step = 0;
-                      });
-                    },
-                  ),
                 Expanded(
                   child: Text(
-                    _step == 0
-                        ? widget.title
-                        : _step == 1
-                            ? (_isVideoMode
-                                ? 'Camera • Record Video Reel'
-                                : 'Camera • Capture Photo')
-                            : 'Choose from Device Gallery',
+                    widget.title,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
@@ -268,479 +245,235 @@ class _RoamBiteMediaPickerSheetState extends State<_RoamBiteMediaPickerSheet> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
+                  onPressed:
+                      _isUploading ? null : () => Navigator.pop(context),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            if (_step == 0) _buildChooserView(theme),
-            if (_step == 1) _buildCameraViewfinder(theme),
-            if (_step == 2) _buildGalleryPicker(theme),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChooserView(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (widget.allowVideo) ...[
-          Row(
-            children: [
-              Expanded(
-                child: ChoiceChip(
-                  avatar: const Icon(Icons.photo_camera_outlined, size: 16),
-                  label: const Text('Photo Mode'),
-                  selected: !_isVideoMode,
-                  onSelected: (_) => setState(() => _isVideoMode = false),
-                ),
+            if (widget.allowVideo) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: ChoiceChip(
+                      avatar: const Icon(Icons.photo_camera_outlined, size: 16),
+                      label: const Text('Photo Mode'),
+                      selected: !_isVideoMode,
+                      onSelected: _isUploading
+                          ? null
+                          : (_) => setState(() => _isVideoMode = false),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ChoiceChip(
+                      avatar: const Icon(Icons.videocam_outlined, size: 16),
+                      label: const Text('Video Reel Mode'),
+                      selected: _isVideoMode,
+                      onSelected: _isUploading
+                          ? null
+                          : (_) => setState(() => _isVideoMode = true),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ChoiceChip(
-                  avatar: const Icon(Icons.videocam_outlined, size: 16),
-                  label: const Text('Video Reel Mode'),
-                  selected: _isVideoMode,
-                  onSelected: (_) => setState(() => _isVideoMode = true),
-                ),
-              ),
+              const SizedBox(height: 14),
             ],
-          ),
-          const SizedBox(height: 14),
-        ],
-        // Option 1: Open Camera
-        InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => setState(() => _step = 1),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF5722).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: const Color(0xFFFF5722).withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFF5722),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _isVideoMode ? Icons.videocam : Icons.camera_alt,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _isVideoMode
-                            ? 'Open Camera to Record Video Reel'
-                            : 'Open Camera to Take Photo',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _isVideoMode
-                            ? 'Capture a live 15s food truck video review with camera'
-                            : 'Snap a fresh photo directly from your camera',
-                        style: TextStyle(color: theme.hintColor, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: Color(0xFFFF5722)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Option 2: Upload from Gallery
-        InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => setState(() => _step = 2),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: theme.dividerColor),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E88E5).withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.photo_library_outlined,
-                    color: Color(0xFF1E88E5),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _isVideoMode
-                            ? 'Upload Video or Photo from Gallery'
-                            : 'Upload Photo from Gallery',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Select from your device camera roll & saved food shots',
-                        style: TextStyle(color: theme.hintColor, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCameraViewfinder(ThemeData theme) {
-    final currentShot =
-        _cameraDishShots[_cameraPreviewIndex % _cameraDishShots.length];
-    return Column(
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            children: [
-              Image.network(
-                currentShot['url']!,
-                height: 260,
+            if (_errorMessage != null) ...[
+              Container(
                 width: double.infinity,
-                fit: BoxFit.cover,
-              ),
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: _isRecording
-                          ? Colors.redAccent
-                          : Colors.white.withValues(alpha: 0.4),
-                      width: _isRecording ? 3 : 1.5,
-                    ),
-                  ),
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
                 ),
-              ),
-              // Camera HUD Overlay
-              Positioned(
-                top: 12,
-                left: 12,
-                right: 12,
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.circle,
-                            size: 10,
-                            color: _isRecording
-                                ? Colors.redAccent
-                                : const Color(0xFF00C853),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _isRecording
-                                ? 'REC 00:${_recordSeconds.toString().padLeft(2, '0')}'
-                                : (_frontCamera ? 'FRONT LENS' : 'HD REAR LENS'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        IconButton(
-                          style: IconButton.styleFrom(
-                              backgroundColor: Colors.black54),
-                          onPressed: () =>
-                              setState(() => _flashOn = !_flashOn),
-                          icon: Icon(
-                            _flashOn ? Icons.flash_on : Icons.flash_off,
-                            color: _flashOn ? Colors.amber : Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          style: IconButton.styleFrom(
-                              backgroundColor: Colors.black54),
-                          onPressed: () => setState(() {
-                            _frontCamera = !_frontCamera;
-                            _cameraPreviewIndex++;
-                          }),
-                          icon: const Icon(
-                            Icons.cameraswitch_outlined,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Scene selector pill
-              Positioned(
-                bottom: 12,
-                left: 12,
-                right: 12,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                    Icon(Icons.error_outline,
+                        color: Colors.red.shade700, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
                       child: Text(
-                        currentShot['label']!,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600),
+                        _errorMessage!,
+                        style: TextStyle(
+                          color: Colors.red.shade900,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.black87,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () =>
-                          setState(() => _cameraPreviewIndex++),
-                      icon: const Icon(Icons.refresh, size: 14),
-                      label: const Text('Switch Angle',
-                          style: TextStyle(fontSize: 11)),
                     ),
                   ],
                 ),
               ),
             ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            TextButton.icon(
-              onPressed: () => setState(() => _step = 2),
-              icon: const Icon(Icons.photo_library_outlined),
-              label: const Text('Gallery'),
-            ),
-            GestureDetector(
-              onTap: _handleCameraCapture,
-              child: Container(
-                width: 72,
-                height: 72,
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: _isVideoMode
-                        ? Colors.redAccent
-                        : const Color(0xFFFF5722),
-                    width: 4,
-                  ),
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: _isVideoMode
-                        ? Colors.redAccent
-                        : const Color(0xFFFF5722),
-                    shape: _isRecording ? BoxShape.rectangle : BoxShape.circle,
-                    borderRadius:
-                        _isRecording ? BorderRadius.circular(8) : null,
-                  ),
-                  child: Icon(
-                    _isVideoMode
-                        ? (_isRecording ? Icons.stop : Icons.videocam)
-                        : Icons.camera_alt,
-                    color: Colors.white,
-                    size: 28,
-                  ),
+            if (_isUploading) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                alignment: Alignment.center,
+                child: const Column(
+                  children: [
+                    CircularProgressIndicator(color: Color(0xFFFF5722)),
+                    SizedBox(height: 14),
+                    Text(
+                      'Uploading to RoamBite Storage...',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            if (widget.allowVideo)
-              TextButton.icon(
-                onPressed: () =>
-                    setState(() => _isVideoMode = !_isVideoMode),
-                icon: Icon(
-                    _isVideoMode ? Icons.camera_alt : Icons.videocam_outlined),
-                label: Text(_isVideoMode ? 'Photo' : 'Video'),
-              )
-            else
-              const SizedBox(width: 72),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGalleryPicker(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Recent Photos & Video Clips on Device',
-          style: TextStyle(
-            color: theme.hintColor,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 10),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _galleryItems.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.35,
-          ),
-          itemBuilder: (ctx, i) {
-            final item = _galleryItems[i];
-            return GestureDetector(
-              onTap: () {
-                Navigator.pop(
-                  context,
-                  PickedMediaResult(
-                    url: item['url']!,
-                    isVideo: _isVideoMode,
-                    sourceLabel: 'Gallery (${item['label']})',
-                    duration: item['duration'] ?? '0:15',
+            ] else ...[
+              // Option 1: Open Camera (ImageSource.camera)
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => _pickAndUpload(ImageSource.camera),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF5722).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: const Color(0xFFFF5722).withValues(alpha: 0.35),
+                    ),
                   ),
-                );
-              },
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.network(item['url']!, fit: BoxFit.cover),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 5),
-                        color: Colors.black.withValues(alpha: 0.65),
-                        child: Row(
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFF5722),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          _isVideoMode ? Icons.videocam : Icons.camera_alt,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
+                            Text(
                               _isVideoMode
-                                  ? Icons.play_circle_fill
-                                  : Icons.photo,
-                              color: Colors.white,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                item['label']!,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                  ? 'Open Camera to Record Video'
+                                  : 'Open Camera to Take Photo',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
                               ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _isVideoMode
+                                  ? 'Record a video clip with your device camera'
+                                  : 'Take a photo directly with your device camera',
+                              style: TextStyle(
+                                  color: theme.hintColor, fontSize: 12),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _customUrlCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Or paste custom image/video URL...',
-                  isDense: true,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                      const Icon(Icons.chevron_right,
+                          color: Color(0xFFFF5722)),
+                    ],
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF5722),
-                foregroundColor: Colors.white,
+              const SizedBox(height: 12),
+              // Option 2: Upload from Gallery (ImageSource.gallery)
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => _pickAndUpload(ImageSource.gallery),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: theme.dividerColor),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF1E88E5).withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.photo_library_outlined,
+                          color: Color(0xFF1E88E5),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _isVideoMode
+                                  ? 'Upload Video from Gallery'
+                                  : 'Upload Photo from Gallery',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Choose an existing file from your photo library',
+                              style: TextStyle(
+                                  color: theme.hintColor, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                ),
               ),
-              onPressed: () {
-                final text = _customUrlCtrl.text.trim();
-                if (text.isNotEmpty) {
-                  Navigator.pop(
-                    context,
-                    PickedMediaResult(
-                      url: text,
-                      isVideo: _isVideoMode,
-                      sourceLabel: 'Custom URL',
+              const SizedBox(height: 16),
+              // Option 3: Custom URL option
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _customUrlCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Or paste custom image/video URL...',
+                        isDense: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onSubmitted: (_) => _submitCustomUrl(),
                     ),
-                  );
-                }
-              },
-              child: const Text('Use URL'),
-            ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF5722),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _submitCustomUrl,
+                    child: const Text('Use URL'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
-      ],
+      ),
     );
   }
 }

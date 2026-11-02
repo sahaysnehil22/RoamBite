@@ -118,6 +118,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     final picked = await showRoamBiteMediaPicker(
       context,
       title: 'Upload Truck Profile & Radar Photo',
+      storageFolder: 'trucks/$_managedTruckId',
       allowVideo: false,
     );
     if (picked != null && mounted) {
@@ -125,6 +126,15 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
         _profileImgCtrl.text = picked.url;
         _photoSourceLabel = picked.sourceLabel;
       });
+      await SupabaseService().updateTruckProfileInDb(
+        truckId: _managedTruckId,
+        name: _nameCtrl.text.trim(),
+        tagline: _taglineCtrl.text.trim(),
+        cuisine: _cuisineCtrl.text.trim(),
+        address: _addressCtrl.text.trim(),
+        closesAt: _closesAtCtrl.text.trim(),
+        profileImageUrl: picked.url,
+      );
     }
   }
 

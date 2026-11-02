@@ -132,6 +132,12 @@ class DemoTrucks {
 
   static bool isTruckSaved(String truckId) => _savedTruckIds.contains(truckId);
 
+  static void setSavedTruckIds(Iterable<String> ids) {
+    _savedTruckIds
+      ..clear()
+      ..addAll(ids);
+  }
+
   static bool toggleSavedTruck(String truckId) {
     if (_savedTruckIds.contains(truckId)) {
       _savedTruckIds.remove(truckId);
@@ -143,6 +149,17 @@ class DemoTrucks {
   }
 
   static Set<String> get savedTruckIds => Set.unmodifiable(_savedTruckIds);
+
+  static List<FoodTruck> getSavedTrucks({
+    double? userLat,
+    double? userLng,
+  }) {
+    final all = forLocation(
+      userLat: userLat ?? miamiHub.latitude,
+      userLng: userLng ?? miamiHub.longitude,
+    );
+    return all.where((t) => _savedTruckIds.contains(t.id)).toList();
+  }
 
   static void addDishToTruck(String truckId, MenuItem newDish) {
     final current = getTruckById(truckId);

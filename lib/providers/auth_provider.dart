@@ -3,6 +3,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/push_notification_service.dart';
 import '../services/supabase_service.dart';
 
 enum UserRole { foodie, truckOwner }
@@ -28,7 +29,6 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isSignedIn => _isSignedIn;
   bool get isAuthenticated => _isSignedIn;
-
   UserRole get role => _role;
   bool get isTruckOwner => _role == UserRole.truckOwner;
   String? get userId => _userId;
@@ -148,17 +148,36 @@ class AuthProvider extends ChangeNotifier {
     _phoneNumber = user.phone ?? _phoneNumber;
     _email = user.email ?? _email;
     var role = _role;
-    final serverRole = await SupabaseService().getUserRole(user.id);
-    if (serverRole != null) {
-      role = serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+    final profileRow = await SupabaseService().getUserProfile(user.id);
+    if (profileRow != null) {
+      final serverRole = profileRow['role'] as String?;
+      if (serverRole != null) {
+        role =
+            serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+      }
+      final dbAvatar = profileRow['avatar_url'] as String?;
+      if (dbAvatar != null && dbAvatar.isNotEmpty) {
+        _avatarUrl = dbAvatar;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('roambite_avatar_url', dbAvatar);
+      }
+    } else {
+      final serverRole = await SupabaseService().getUserRole(user.id);
+      if (serverRole != null) {
+        role =
+            serverRole == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
+      }
     }
     final metadata = user.userMetadata;
     final metadataName = metadata == null
         ? null
         : (metadata['full_name'] ?? metadata['name']);
-    final name = metadataName is String && metadataName.isNotEmpty
-        ? metadataName
-        : (_displayName ?? 'RoamBite Member');
+    final dbName = profileRow?['display_name'] as String?;
+    final name = (dbName != null && dbName.isNotEmpty)
+        ? dbName
+        : (metadataName is String && metadataName.isNotEmpty
+            ? metadataName
+            : (_displayName ?? 'RoamBite Member'));
     final pendingRole = _pendingGoogleRole;
     if (pendingRole != null) {
       role = pendingRole;
@@ -169,12 +188,14 @@ class AuthProvider extends ChangeNotifier {
           userId: user.id,
           role: roleStr,
           displayName: name,
+          avatarUrl: _avatarUrl,
         );
       } catch (e) {
         debugPrint('Persisting Google role failed: $e');
       }
     }
     await _setLocalSession(id: user.id, role: role, name: name);
+    await PushNotificationService().syncTokenForCurrentUser();
     _isLoading = false;
     notifyListeners();
   }
@@ -210,12 +231,26 @@ class AuthProvider extends ChangeNotifier {
         _userId = current.id;
         _phoneNumber = current.phone ?? _phoneNumber;
         _email = current.email ?? _email;
-        final serverRole = await SupabaseService().getUserRole(current.id);
-        if (serverRole != null) {
-          _role = serverRole == 'truck_owner'
-              ? UserRole.truckOwner
-              : UserRole.foodie;
+        final profileRow = await SupabaseService().getUserProfile(current.id);
+        if (profileRow != null) {
+          final serverRole = profileRow['role'] as String?;
+          if (serverRole != null) {
+            _role = serverRole == 'truck_owner'
+                ? UserRole.truckOwner
+                : UserRole.foodie;
+          }
+          final dbAvatar = profileRow['avatar_url'] as String?;
+          if (dbAvatar != null && dbAvatar.isNotEmpty) {
+            _avatarUrl = dbAvatar;
+            await prefs.setString('roambite_avatar_url', dbAvatar);
+          }
+          final dbName = profileRow['display_name'] as String?;
+          if (dbName != null && dbName.isNotEmpty) {
+            _displayName = dbName;
+            await prefs.setString('roambite_display_name', dbName);
+          }
         }
+        await PushNotificationService().syncTokenForCurrentUser();
       }
     } catch (e) {
       debugPrint('Auth initialization error: $e');
@@ -266,13 +301,16 @@ class AuthProvider extends ChangeNotifier {
       await prefs.setString('roambite_avatar_url', _avatarUrl!);
     }
 
-    if (SupabaseConfig.isConfigured && _userId != null) {
+    final activeUserId =
+        SupabaseService().client?.auth.currentUser?.id ?? _userId;
+    if (SupabaseConfig.isConfigured && activeUserId != null) {
       try {
         await SupabaseService().setProfileRole(
-          userId: _userId!,
+          userId: activeUserId,
           role: _role == UserRole.truckOwner ? 'truck_owner' : 'foodie',
           displayName: _displayName,
           phone: _phoneNumber,
+          avatarUrl: _avatarUrl,
         );
       } catch (e) {
         debugPrint('Profile sync warning: $e');
@@ -291,10 +329,10 @@ class AuthProvider extends ChangeNotifier {
   Future<void> selectRole(String role) async {
     _role = role == 'truck_owner' ? UserRole.truckOwner : UserRole.foodie;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('roambite_user_role', _role == UserRole.truckOwner ? 'truck_owner' : 'foodie');
+    await prefs.setString('roambite_user_role',
+        _role == UserRole.truckOwner ? 'truck_owner' : 'foodie');
     notifyListeners();
   }
-  
 
   /// Sign In with Google
   Future<void> signInWithGoogle(UserRole selectedRole) async {

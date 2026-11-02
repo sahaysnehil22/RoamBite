@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/food_truck.dart';
 import '../providers/auth_provider.dart';
+import '../services/demo_trucks.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/google_maps_directions_sheet.dart';
@@ -27,6 +28,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _onlyNearAndFast = false;
   final TextEditingController _searchController = TextEditingController();
   List<FoodTruck> _trucks = [];
+  Set<String> _savedTruckIds = DemoTrucks.savedTruckIds;
   bool _isLoading = true;
 
   static const List<Map<String, dynamic>> _categories = [
@@ -60,12 +62,31 @@ class _ExploreScreenState extends State<ExploreScreen> {
       userLat: widget.currentLocation.latitude,
       userLng: widget.currentLocation.longitude,
     );
+    final savedIds = await SupabaseService().fetchSavedTruckIds();
     if (mounted) {
       setState(() {
         _trucks = results;
+        _savedTruckIds = savedIds;
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _toggleSaved(FoodTruck truck) async {
+    final nowSaved = await SupabaseService().toggleSavedTruck(truck.id);
+    if (!mounted) return;
+    setState(() {
+      _savedTruckIds = DemoTrucks.savedTruckIds;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(nowSaved
+            ? 'Saved ${truck.name} to your Saved list'
+            : 'Removed ${truck.name} from Saved'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -395,6 +416,30 @@ class _ExploreScreenState extends State<ExploreScreen> {
                               fontWeight: FontWeight.bold),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => _toggleSaved(truck),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          _savedTruckIds.contains(truck.id)
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          size: 18,
+                          color: _savedTruckIds.contains(truck.id)
+                              ? const Color(0xFFFF5722)
+                              : Colors.white,
+                        ),
+                      ),
                     ),
                   ),
                 ),
