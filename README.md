@@ -8,6 +8,18 @@ Designed around a segregated dual-shell architecture:
 
 ---
 
+## 🎬 Demo
+
+**▶ Watch the demo video (2:16):** https://drive.google.com/file/d/1mt1Xy_6jALUrGZ5CKB3YRvs06ZhQufIy/view
+
+Built for the **Meta AI Developer Hackathon 2026**. The video walks through the full app on a real device: live discovery, menus and video reels, a review posted with a real camera upload, radar alerts, and the truck owner side.
+
+| Home dashboard | Reels & verified reviews | Radar discovery | Owner analytics |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/screenshots/dashboard.png" width="180" alt="Home dashboard with live food trucks"> | <img src="docs/screenshots/reels.png" width="180" alt="Video reel review playing on a truck page"> | <img src="docs/screenshots/radar.png" width="180" alt="Radar map showing trucks serving nearby"> | <img src="docs/screenshots/analytics.png" width="180" alt="Truck owner analytics: scans, direction taps and verified reviews"> |
+
+---
+
 ## 📱 Architecture & Key Features
 
 ### 1. Dual Shell Model (Foodie vs Truck Owner)
@@ -35,7 +47,7 @@ Designed around a segregated dual-shell architecture:
 - **Frontend**: Flutter 3.x (Dart 3)
 - **State Management**: `Provider` (MultiProvider with `ThemeProvider` & `AuthProvider`)
 - **Backend & Auth**: Supabase (PostgreSQL 15 + PostGIS extension, Row Level Security, RPCs)
-- **Auth Providers**: Phone SMS OTP and Google OAuth via Supabase Auth
+- **Auth Providers**: Google OAuth via Supabase Auth (a phone OTP sign-in screen is included; the SMS provider is not enabled yet)
 - **Persistence**: `shared_preferences` for offline caching and theme persistence
 - **CI/CD**: GitHub Actions for automated linting, widget testing, and release APK packaging
 
@@ -57,9 +69,9 @@ flutter pub get
 
 ### 2. Database Migrations & Seeds
 1. In your Supabase project (or local instance via `supabase start`):
-2. Apply the schema migration:
-   - Navigate to `supabase/migrations/00001_initial_schema.sql`
-   - Run the script in the Supabase SQL Editor.
+2. Apply the schema migrations:
+   - Navigate to `supabase/migrations/`
+   - Run the scripts in order (`00001`, `00002`, `00003`) in the Supabase SQL Editor.
 3. Seed sample data (Miami & Austin demo food trucks, menus, and locations):
    - Run `supabase/seed.sql` in the Supabase SQL Editor.
 
@@ -168,7 +180,7 @@ RoamBite/
 │   ├── migrations/
 │   │   └── 00001_initial_schema.sql  # PostGIS tables, RLS, spatial indexes, RPCs
 │   └── seed.sql                       # 4 demo food trucks with menus & coordinates
-└── pubspec.yaml                       # Dependencies, assets & version 1.1.0+2
+└── pubspec.yaml                       # Dependencies, assets & version 1.2.0+3
 ```
 
 ---
